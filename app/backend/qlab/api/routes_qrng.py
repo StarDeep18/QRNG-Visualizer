@@ -52,6 +52,8 @@ def qrng_config(request: Request) -> dict:
             "min_shots": limits.min_shots,
             "max_shots": limits.max_shots,
             "default_shots": limits.default_shots,
+            "max_bits": limits.max_bits,
+            "default_bits": limits.default_bits,
             "job_timeout_s": limits.job_timeout_s,
             "submit_cooldown_s": limits.submit_cooldown_s,
         },

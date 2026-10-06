@@ -97,14 +97,17 @@ def test_gitignore_protects_env_files():
     assert ".env.example" in gitignore or "!.env.example" in gitignore
 
 
-def test_frontend_never_imports_backend_config():
-    """The frontend source must not reference backend env vars at all."""
+def test_frontend_never_reads_backend_config():
+    """The frontend must never READ backend credentials. Mentioning the env
+    var NAME in setup-instructions copy is fine (and useful); accessing
+    process.env / import.meta.env with it is not."""
     frontend = REPO_ROOT / "app" / "frontend" / "src"
     if not frontend.is_dir():
         pytest.skip("frontend src not present yet")
     offenders = []
     for path in frontend.rglob("*.ts*"):
         text = path.read_text(errors="ignore")
-        if "IBM_QUANTUM" in text:
-            offenders.append(str(path))
-    assert not offenders, f"backend env names found in frontend: {offenders}"
+        for forbidden in ("process.env.IBM_QUANTUM", "import.meta.env.IBM_QUANTUM"):
+            if forbidden in text:
+                offenders.append(f"{path}: {forbidden}")
+    assert not offenders, f"frontend reads backend credentials: {offenders}"
