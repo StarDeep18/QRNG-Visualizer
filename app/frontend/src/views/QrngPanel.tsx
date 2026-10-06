@@ -277,10 +277,35 @@ function QrngResultView({
       </section>
 
       {!showReplay && (
+        <>
+        <section className="panel">
+          <header className="panel-head">
+            <span className="idx">03</span>
+            <span className="ttl">Execution record — how this result came to be</span>
+            <span className="note micro">{result.status_history.length} recorded states</span>
+          </header>
+          <div className="panel-body">
+            <div className="stage-list">
+              {result.status_history.map((h, i) => (
+                <div className={`stage ${i === result.status_history.length - 1 ? 'done' : 'done'}`} key={i}>
+                  <span className="st-idx">{String(i + 1).padStart(2, '0')}</span>
+                  <span className="st-name">{h.state.replace('_', ' ')}</span>
+                  <span className="st-detail">{h.detail ?? ''}</span>
+                  <span className="st-time">{h.at.replace('T', ' ').replace('Z', '')}</span>
+                </div>
+              ))}
+            </div>
+            <div className="stage-note">
+              recorded from the backend/provider lifecycle — replaying this experiment will never
+              change this record
+            </div>
+          </div>
+        </section>
+
         <div className="cols-2">
           <section className="panel">
             <header className="panel-head">
-              <span className="idx">03</span>
+              <span className="idx">04</span>
               <span className="ttl">Theoretical vs observed</span>
             </header>
             <div className="panel-body">
@@ -321,7 +346,7 @@ function QrngResultView({
 
           <section className="panel">
             <header className="panel-head">
-              <span className="idx">04</span>
+              <span className="idx">05</span>
               <span className="ttl">Provenance — where did these bits come from?</span>
             </header>
             <div className="panel-body">
@@ -334,6 +359,7 @@ function QrngResultView({
             </div>
           </section>
         </div>
+        </>
       )}
     </>
   )
