@@ -145,7 +145,11 @@ class Experiment:
 
     def transition(self, state: JobState, detail: Optional[str] = None) -> None:
         with self._lock:
-            if state is self.status and detail is None:
+            if state is self.status:
+                # same state, new detail → update in place, no duplicate history
+                if detail is not None:
+                    self.status_detail = detail
+                    self.updated_at = utcnow()
                 return
             self.status = state
             self.status_detail = detail

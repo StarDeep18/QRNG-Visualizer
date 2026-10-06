@@ -13,7 +13,11 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from ..models import Experiment, JobState, TERMINAL_STATES
+from ..models import Experiment, JobState, TERMINAL_STATES, iso
+
+
+def iso_now(exp: Experiment) -> str:
+    return iso(exp.created_at)
 
 
 class ExperimentStore:
@@ -68,6 +72,9 @@ class ExperimentStore:
         with self._lock:
             self._seq += 1
             exp = Experiment(id=f"EXP-{self._seq:05d}", **kwargs)
+            exp.status_history.append(
+                {"state": exp.status.value, "at": iso_now(exp), "detail": "experiment created"}
+            )
             self._experiments[exp.id] = exp
             return exp
 

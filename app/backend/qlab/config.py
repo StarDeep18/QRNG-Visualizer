@@ -24,9 +24,11 @@ from dotenv import dotenv_values
 # Locations
 # ---------------------------------------------------------------------------
 
-# .../app/backend/qlab/config.py -> repo root is three parents up + /app
-_BACKEND_DIR = Path(__file__).resolve().parents[2]          # .../app/backend
-_REPO_ROOT = _BACKEND_DIR.parent.parent                     # repo root
+# .../app/backend/qlab/config.py
+#   parents[1] = app/backend   (where .env and ./data live by default)
+#   parents[3] = repo root     (where .env.example lives)
+_BACKEND_DIR = Path(__file__).resolve().parents[1]          # .../app/backend
+_REPO_ROOT = Path(__file__).resolve().parents[3]            # repo root
 _ENV_FILES = (                                              # later files win
     _REPO_ROOT / ".env",
     _BACKEND_DIR / ".env",
