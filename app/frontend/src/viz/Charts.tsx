@@ -4,6 +4,12 @@
 
 import { runningOneFrequency, sigmaPct } from '../lib/bits'
 
+const BLUE = '#4f8dff'
+const CYAN = '#12b5a0'
+const AMBER = '#ffb454'
+const DIM = '#5d6976'
+const MONO = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace'
+
 export function DistributionChart({
   zeroCount,
   oneCount,
@@ -30,6 +36,12 @@ export function DistributionChart({
         <span className="dist-label">observed — 0</span>
         <div className="dist-track">
           <div className="dist-fill obs0" style={{ width: `${zeroPct}%` }} />
+          {sigma > 0 && sigma < 25 && (
+            <div
+              className="sigma-band"
+              style={{ left: `${bandLeft}%`, width: `${bandWidth}%` }}
+            />
+          )}
         </div>
         <span className="dist-value">{zeroPct.toFixed(1)}%</span>
       </div>
@@ -37,17 +49,25 @@ export function DistributionChart({
         <span className="dist-label">observed — 1</span>
         <div className="dist-track">
           <div className="dist-fill obs1" style={{ width: `${onePct}%` }} />
+          {sigma > 0 && sigma < 25 && (
+            <div
+              className="sigma-band"
+              style={{ left: `${bandLeft}%`, width: `${bandWidth}%` }}
+            />
+          )}
         </div>
         <span className="dist-value">{onePct.toFixed(1)}%</span>
       </div>
       <div className="dist-row">
-        <span className="dist-label">theoretical — 0/1</span>
+        <span className="dist-label">theory — 0/1</span>
         <div className="dist-track" title={`expected 1σ range: ±${sigma.toFixed(2)}%`}>
           <div className="dist-fill theory" style={{ width: '50%' }} />
-          <div
-            className="sigma-band"
-            style={{ left: `${bandLeft}%`, width: `${bandWidth}%` }}
-          />
+          {sigma > 0 && sigma < 25 && (
+            <div
+              className="sigma-band"
+              style={{ left: `${bandLeft}%`, width: `${bandWidth}%` }}
+            />
+          )}
         </div>
         <span className="dist-value">50.0%</span>
       </div>
@@ -55,24 +75,21 @@ export function DistributionChart({
         <>
           <div className="dist-legend">
             <span>
-              <span className="swatch" style={{ background: '#1a1712' }} />
+              <span className="swatch" style={{ background: BLUE, borderColor: BLUE }} />
               observed 0
             </span>
             <span>
-              <span className="swatch" style={{ background: '#2337e0', borderColor: '#2337e0' }} />
+              <span className="swatch" style={{ background: CYAN, borderColor: CYAN }} />
               observed 1
             </span>
             <span>
-              <span className="swatch" />50% theory
+              <span className="swatch" />
+              50% theory
             </span>
             <span>
               <span
                 className="swatch"
-                style={{
-                  borderStyle: 'dashed',
-                  borderColor: '#ff3e00',
-                  background: 'transparent',
-                }}
+                style={{ borderStyle: 'dashed', borderColor: AMBER, background: 'transparent' }}
               />
               ±1σ for n={total} = ±{sigma.toFixed(2)}%
             </span>
@@ -110,7 +127,9 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
   const y = (pct: number) =>
     padT + plotH * (1 - (Math.min(yMax, Math.max(yMin, pct)) - yMin) / (yMax - yMin))
 
-  const path = points.map((pct, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(pct).toFixed(1)}`).join(' ')
+  const path = points
+    .map((pct, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(pct).toFixed(1)}`)
+    .join(' ')
 
   return (
     <svg
@@ -125,12 +144,20 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
         y={y(50 + sigma)}
         width={plotW}
         height={Math.max(1, y(50 - sigma) - y(50 + sigma))}
-        fill="rgba(35,55,224,0.08)"
+        fill="rgba(79,141,255,0.09)"
       />
       {/* 50% reference */}
-      <line x1={padL} y1={y(50)} x2={width - padR} y2={y(50)} stroke="#1a1712" strokeDasharray="5 4" strokeWidth="1.5" />
+      <line
+        x1={padL}
+        y1={y(50)}
+        x2={width - padR}
+        y2={y(50)}
+        stroke="#3a4c60"
+        strokeDasharray="5 4"
+        strokeWidth="1.2"
+      />
       {/* trace */}
-      <path d={path} fill="none" stroke="#2337e0" strokeWidth="2" />
+      <path d={path} fill="none" stroke={CYAN} strokeWidth="1.8" />
       {/* axis labels */}
       {[70, 60, 50, 40, 30].map((pct) => (
         <text
@@ -138,30 +165,17 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
           x={padL - 6}
           y={y(pct) + 3.5}
           textAnchor="end"
-          fontFamily="ui-monospace, Menlo, monospace"
+          fontFamily={MONO}
           fontSize="9.5"
-          fill="rgba(26,23,18,0.6)"
+          fill={DIM}
         >
           {pct}%
         </text>
       ))}
-      <text
-        x={padL}
-        y={height - 6}
-        fontFamily="ui-monospace, Menlo, monospace"
-        fontSize="9.5"
-        fill="rgba(26,23,18,0.6)"
-      >
+      <text x={padL} y={height - 6} fontFamily={MONO} fontSize="9.5" fill={DIM}>
         shot 1
       </text>
-      <text
-        x={width - padR}
-        y={height - 6}
-        textAnchor="end"
-        fontFamily="ui-monospace, Menlo, monospace"
-        fontSize="9.5"
-        fill="rgba(26,23,18,0.6)"
-      >
+      <text x={width - padR} y={height - 6} textAnchor="end" fontFamily={MONO} fontSize="9.5" fill={DIM}>
         shot {n}
       </text>
     </svg>

@@ -1,6 +1,9 @@
 /* Compare — PRNG vs QRNG side by side, with provenance preserved.
  * Technically honest: a near-50/50 histogram appears on BOTH sides; the
- * comparison is about SOURCE and REPRODUCIBILITY, not "more random". */
+ * comparison is about SOURCE and REPRODUCIBILITY, not "more random".
+ * The two columns are deliberately structured differently — they describe
+ * genuinely different processes.
+ */
 
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
@@ -20,7 +23,10 @@ export function CompareView() {
   const [error, setError] = useState<ApiError | null>(null)
 
   const completedQrng = useMemo(
-    () => experiments.filter((e) => e.kind === 'qrng' && e.status === 'COMPLETED' && e.bit_count > 0),
+    () =>
+      experiments.filter(
+        (e) => e.kind === 'qrng' && e.status === 'COMPLETED' && e.bit_count > 0,
+      ),
     [experiments],
   )
 
@@ -50,21 +56,32 @@ export function CompareView() {
 
   return (
     <div>
-      <section className="panel">
+      {/* ── setup ── */}
+      <section className="panel" style={{ marginTop: 20 }}>
         <header className="panel-head">
-          <span className="idx">01</span>
-          <span className="ttl">Comparison setup</span>
-          <span className="note micro">provenance is never hidden</span>
+          <h2 className="panel-title">Comparison setup</h2>
+          <span className="panel-note">both sides use real, returned results — nothing staged</span>
         </header>
         <div className="panel-body">
-          <div className="cols-3">
+          <div className="compare-setup">
             <div className="field">
-              <span className="micro">prng seed</span>
-              <input className="input" value={seed} onChange={(e) => setSeed(e.target.value)} maxLength={256} />
+              <label htmlFor="cmp-seed">seed for the PRNG side</label>
+              <input
+                id="cmp-seed"
+                className="input"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+                maxLength={256}
+              />
             </div>
             <div className="field">
-              <span className="micro">prng bits</span>
-              <select className="select" value={bits} onChange={(e) => setBits(Number(e.target.value))}>
+              <label htmlFor="cmp-bits">bits</label>
+              <select
+                id="cmp-bits"
+                className="select"
+                value={bits}
+                onChange={(e) => setBits(Number(e.target.value))}
+              >
                 {[64, 128, 256, 512, 1024].map((o) => (
                   <option key={o} value={o}>
                     {o} bits
@@ -73,25 +90,35 @@ export function CompareView() {
               </select>
             </div>
             <div className="field">
-              <span className="micro">qrng experiment (completed)</span>
-              <select className="select" value={qrngId} onChange={(e) => setQrngId(e.target.value)}>
-                {completedQrng.length === 0 && <option value="">— run a QRNG experiment first —</option>}
+              <label htmlFor="cmp-qrng">QRNG experiment to compare against</label>
+              <select
+                id="cmp-qrng"
+                className="select"
+                value={qrngId}
+                onChange={(e) => setQrngId(e.target.value)}
+              >
+                {completedQrng.length === 0 && <option value="">no completed QRNG run yet</option>}
                 {completedQrng.map((e) => (
                   <option key={e.experiment_id} value={e.experiment_id}>
-                    {e.experiment_id} · {e.source === 'quantum_hardware' ? `HW ${e.backend}` : 'SIM'} ·{' '}
-                    {e.shots} shots
+                    {e.created_at.replace('T', ' ').slice(0, 19)} ·{' '}
+                    {e.source === 'quantum_hardware' ? 'hardware' : 'simulator'} ·{' '}
+                    {e.bit_count} bits
                   </option>
                 ))}
               </select>
             </div>
           </div>
           <div className="btn-row" style={{ marginTop: 14 }}>
-            <button className="btn primary" disabled={loading || !seed.trim() || !qrngId} onClick={() => void run()}>
+            <button
+              className="btn primary"
+              disabled={loading || !qrngId}
+              onClick={() => void run()}
+            >
               {loading ? 'comparing…' : 'run comparison'}
             </button>
-            {completedQrng.length === 0 && (
-              <span className="micro" style={{ color: 'var(--red)' }}>
-                no completed QRNG experiment yet — go to the Lab, run QRNG, come back
+            {!qrngId && (
+              <span className="micro">
+                generate a QRNG run in the Lab first — a comparison needs real data on both sides
               </span>
             )}
           </div>
@@ -103,164 +130,149 @@ export function CompareView() {
         </div>
       </section>
 
+      {/* ── result ── */}
       {data && (
-        <>
-          <div className="compare-grid" style={{ marginTop: 22 }}>
-            {/* ── PRNG side ── */}
-            <div>
-              <div className="display" style={{ fontSize: 26, marginBottom: 4 }}>
-                PRNG
-              </div>
-              <div className="micro" style={{ marginBottom: 14 }}>
-                classical · deterministic · seed-driven
-              </div>
-              <div className="pipeline">
-                <PipeStep node="S" title="seed" sub={`“${data.prng.seed}” — user-supplied input`} />
-                <PipeStep node="A" title="algorithm" sub={`${data.prng.algorithm} — fixed arithmetic`} />
-                <PipeStep node="C" title="deterministic computation" sub={data.prng.seed_derivation} />
-                <PipeStep node="B" title="bit stream" sub={`${data.prng.zero_count + data.prng.one_count} bits computed`} square />
-              </div>
-              <div className="section-gap" />
-              <StreamLine bits={data.prng.bits} max={96} />
-              <div className="section-gap" />
-              <DistributionChart
-                zeroCount={data.prng.zero_count}
-                oneCount={data.prng.one_count}
-                sigma={data.prng.sigma_pct}
-                compact
-              />
-              <div className="section-gap" />
-              <Fact k="reproducible" v="YES — same seed ⇒ identical stream" good />
-              <Fact k="source" v="classical algorithm (no physics)" />
-              <Fact k="hardware" v="none" />
-            </div>
-
-            <div className="axis" />
-
-            {/* ── QRNG side ── */}
-            <div>
-              <div className="display" style={{ fontSize: 26, marginBottom: 4 }}>
-                QRNG
-              </div>
-              <div className="micro" style={{ marginBottom: 14 }}>
-                {data.qrng.source === 'quantum_hardware'
-                  ? 'quantum hardware · physical measurement'
-                  : 'quantum simulator · labelled'}
-              </div>
-              <div className="pipeline">
-                <PipeStep node="0" title="|0⟩ — qubit prepared" sub="definite initial state" circle />
-                <PipeStep node="H" title="Hadamard" sub="(|0⟩ + |1⟩)/√2 — superposition" />
-                <PipeStep node="M" title="measurement" sub="each shot forces a physical 0/1 outcome" circle />
-                <PipeStep node={data.qrng.source === 'quantum_hardware' ? 'QPU' : 'SIM'} title={data.qrng.backend ?? 'backend'} sub={`provider: ${data.qrng.provider} · job ${data.qrng.provider_job_id ?? '—'}`} square />
-              </div>
-              <div className="section-gap" />
-              <StreamLine bits={data.qrng.bits} max={96} />
-              <div className="section-gap" />
-              <DistributionChart
-                zeroCount={data.qrng.zero_count}
-                oneCount={data.qrng.one_count}
-                sigma={data.qrng.sigma_pct ?? 0}
-                compact
-              />
-              <div className="section-gap" />
-              <Fact k="reproducible" v="NO — re-running creates new physical measurements" />
-              <Fact k="source" v={data.qrng.source.replace(/_/g, ' ')} good={data.qrng.source === 'quantum_hardware'} />
-              <Fact k="hardware" v={data.qrng.backend ?? '—'} />
-              <Fact k="shots" v={String(data.qrng.shots)} />
-            </div>
-          </div>
-
-          <section className="panel" style={{ marginTop: 22 }}>
-            <header className="panel-head">
-              <span className="idx">02</span>
-              <span className="ttl">What this comparison actually shows</span>
-            </header>
-            <div className="panel-body">
-              <div className="cols-2">
-                <div>
-                  <p style={{ marginTop: 0, fontWeight: 700 }}>Same-looking histograms. Different universes of origin.</p>
-                  <p className="kv-note">
-                    Both streams sit near 50/50 — that alone proves nothing about either source. The
-                    PRNG side is a fixed arithmetic function of its seed: replay the seed, replay the
-                    stream. The QRNG side is a record of physical quantum measurements: no seed can
-                    ever reproduce it.
-                  </p>
-                  <p className="kv-note" style={{ marginBottom: 0 }}>
-                    {data.note}
-                  </p>
+        <section className="panel" style={{ marginTop: 20 }}>
+          <header className="panel-head">
+            <h2 className="panel-title">Classical vs quantum — same circuit-length streams</h2>
+            <span className="panel-note">{data.qrng.shots} shots vs {data.prng.bits.length} computed bits</span>
+          </header>
+          <div className="panel-body">
+            <div className="compare-grid">
+              {/* ── PRNG column ── */}
+              <div>
+                <div className="compare-col-head">
+                  <h3>PRNG</h3>
+                  <span className="sub">classical · deterministic</span>
                 </div>
-                <div>
-                  <div className="prov">
-                    <div className="prov-row">
-                      <span className="prov-key">prng experiment</span>
-                      <span className="prov-val">{data.prng.experiment_id}</span>
+                <div className="pipe-list">
+                  <div className="pipe-step">
+                    <span className="pipe-node circle">S</span>
+                    <div>
+                      <div className="pipe-title">seed</div>
+                      <div className="pipe-sub">“{data.prng.seed}” → {data.prng.seed_derivation}</div>
                     </div>
-                    <div className="prov-row">
-                      <span className="prov-key">qrng experiment</span>
-                      <span className="prov-val">{data.qrng.experiment_id}</span>
+                  </div>
+                  <div className="pipe-step">
+                    <span className="pipe-node circle">ƒ</span>
+                    <div>
+                      <div className="pipe-title">{data.prng.algorithm} — state machine</div>
+                      <div className="pipe-sub">x ← x + 0x9E37…C15 · mix · take MSB · repeat</div>
                     </div>
-                    <div className="prov-row">
-                      <span className="prov-key">qrng provider / backend</span>
-                      <span className="prov-val">
-                        {data.qrng.provider} · {data.qrng.backend ?? '—'}
-                      </span>
+                  </div>
+                  <div className="pipe-step">
+                    <span className="pipe-node circle">01</span>
+                    <div>
+                      <div className="pipe-title">bitstream — computed</div>
+                      <div className="pipe-sub">
+                        {data.prng.bits.length.toLocaleString()} bits · identical for the same seed, forever
+                      </div>
                     </div>
-                    <div className="prov-row">
-                      <span className="prov-key">qrng provider job</span>
-                      <span className="prov-val">{data.qrng.provider_job_id ?? '—'}</span>
+                  </div>
+                </div>
+                <div style={{ margin: '14px 0' }}>
+                  <StreamLine bits={data.prng.bits} max={64} />
+                </div>
+                <DistributionChart
+                  zeroCount={data.prng.zero_count}
+                  oneCount={data.prng.one_count}
+                  sigma={data.prng.sigma_pct}
+                  zScore={data.prng.z_score}
+                  compact
+                />
+                <div className="prov" style={{ marginTop: 14 }}>
+                  <div className="fact-row">
+                    <span className="fact-key">source</span>
+                    <span className="fact-val">classical algorithm</span>
+                  </div>
+                  <div className="fact-row">
+                    <span className="fact-key">reproducible</span>
+                    <span className="fact-val good">yes — same seed ⇒ same stream</span>
+                  </div>
+                  <div className="fact-row">
+                    <span className="fact-key">predictable</span>
+                    <span className="fact-val">in principle, with the seed</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="axis" />
+
+              {/* ── QRNG column ── */}
+              <div>
+                <div className="compare-col-head">
+                  <h3>QRNG</h3>
+                  <span className="sub">
+                    {data.qrng.source === 'quantum_hardware' ? 'quantum hardware' : 'simulator'} · physical measurement
+                  </span>
+                </div>
+                <div className="pipe-list">
+                  <div className="pipe-step">
+                    <span className="pipe-node circle quantum">|0⟩</span>
+                    <div>
+                      <div className="pipe-title">prepare qubit</div>
+                      <div className="pipe-sub">fixed circuit |0⟩ → H → M</div>
                     </div>
+                  </div>
+                  <div className="pipe-step">
+                    <span className="pipe-node circle quantum">H</span>
+                    <div>
+                      <div className="pipe-title">superposition</div>
+                      <div className="pipe-sub">|ψ⟩ = (|0⟩+|1⟩)/√2 · P(0)=P(1)=½</div>
+                    </div>
+                  </div>
+                  <div className="pipe-step">
+                    <span className="pipe-node circle measure">M</span>
+                    <div>
+                      <div className="pipe-title">measure {data.qrng.shots} shots</div>
+                      <div className="pipe-sub">
+                        {data.qrng.provider}
+                        {data.qrng.backend ? ` · ${data.qrng.backend}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ margin: '14px 0' }}>
+                  <StreamLine bits={data.qrng.bits} max={64} />
+                </div>
+                <DistributionChart
+                  zeroCount={data.qrng.zero_count}
+                  oneCount={data.qrng.one_count}
+                  sigma={data.qrng.sigma_pct ?? 0}
+                  zScore={data.qrng.z_score ?? undefined}
+                  compact
+                />
+                <div className="prov" style={{ marginTop: 14 }}>
+                  <div className="fact-row">
+                    <span className="fact-key">source</span>
+                    <span className="fact-val">
+                      {data.qrng.source === 'quantum_hardware' ? 'QPU measurement record' : 'simulator (labelled)'}
+                    </span>
+                  </div>
+                  <div className="fact-row">
+                    <span className="fact-key">job</span>
+                    <span className="fact-val">{data.qrng.provider_job_id ?? data.qrng.experiment_id}</span>
+                  </div>
+                  <div className="fact-row">
+                    <span className="fact-key">reproducible</span>
+                    <span className="fact-val bad">no — re-running is a new physical experiment</span>
                   </div>
                 </div>
               </div>
             </div>
-          </section>
-        </>
+
+            <p className="kv-note" style={{ marginTop: 18, marginBottom: 0 }}>
+              <b>Read this honestly:</b> both histograms sit near 50/50 — a histogram alone cannot
+              tell you where bits came from, and near-50/50 is <i>consistent with</i>, not proof
+              of, quantum measurement. The difference is in the columns above:{' '}
+              <b>process and provenance</b>. The PRNG side is a deterministic function of its
+              seed; the QRNG side is a record of physical measurements with a provider, backend
+              and job id attached. Finite samples fluctuate on both sides (±
+              {data.qrng.sigma_pct?.toFixed(2) ?? '—'}% expected 1σ at n={data.qrng.shots}).
+            </p>
+          </div>
+        </section>
       )}
-    </div>
-  )
-}
-
-function PipeStep({
-  node,
-  title,
-  sub,
-  circle,
-  square,
-}: {
-  node: string
-  title: string
-  sub: string
-  circle?: boolean
-  square?: boolean
-}) {
-  return (
-    <div className="pipe-step">
-      <span
-        className={`pipe-node ${circle ? 'circle' : ''} ${node === 'H' ? '' : ''}`}
-        style={
-          square
-            ? { borderRadius: 0 }
-            : undefined
-        }
-      >
-        {node}
-      </span>
-      <span>
-        <span className="pipe-title">{title}</span>
-        <br />
-        <span className="pipe-sub">{sub}</span>
-      </span>
-    </div>
-  )
-}
-
-function Fact({ k, v, good }: { k: string; v: string; good?: boolean }) {
-  return (
-    <div className="prov-row">
-      <span className="prov-key">{k}</span>
-      <span className="prov-val" style={good ? { color: 'var(--green)', fontWeight: 700 } : undefined}>
-        {v}
-      </span>
     </div>
   )
 }

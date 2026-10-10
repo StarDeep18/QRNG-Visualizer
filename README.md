@@ -67,6 +67,29 @@ Or just: `make bootstrap && make dev` / `make prod`.
 
 ---
 
+## The interface (redesign)
+
+A dark **"quantum instrument"** visual system: deep-charcoal background, graphite
+panels, Inter/JetBrains Mono type pairing, restrained cyan for active quantum
+state, blue for classical/simulator, amber for measurement outcomes.
+
+- **Lab** — a real three.js Bloch-sphere scene (lazy-loaded, WebGL-fallback SVG,
+  reduced-motion aware) showing the circuit's state math: |0⟩ → H → |+⟩ →
+  measurement → collapse. A view-mode badge is always explicit about what the
+  scene reflects (ILLUSTRATIVE / QUEUED / RUNNING / RETURNED RESULTS / REPLAY) —
+  it is an explanatory visualization, never a claim about QPU internals.
+- **Generated bitstream** — first-class: the exact API-returned sequence in large
+  monospace binary (byte-grouped, offset gutters), a BigInt hex view with
+  documented nibble padding, or the dot grid; copy / TXT / JSON export;
+  expandable full output; totals with percentages.
+- **Quantum replay** — deterministic shot-by-shot replay of the returned record
+  (play/pause/step/speed/reset); the scene and circuit strip follow it.
+- **PRNG** — the deterministic pipeline (seed → SplitMix64 → MSB → stream) with
+  same-seed reproducibility shown side by side.
+- **Compare** — source, process, reproducibility and provenance for both sides,
+  with the statistics read honestly (near-50/50 is consistent with, not proof
+  of, quantum measurement).
+
 ## Real hardware smoke test (Milestone 2)
 
 With the token configured:

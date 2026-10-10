@@ -4,20 +4,31 @@ import { useState } from 'react'
 import { useStore } from '../state/store'
 import { StatusChip } from '../components/StatusPanels'
 
+function SourceChip({ source }: { source: string }) {
+  if (source === 'quantum_hardware')
+    return <span className="chip done">hardware</span>
+  if (source === 'quantum_simulator') return <span className="chip">simulator</span>
+  return <span className="chip warn">classical</span>
+}
+
 export function ExperimentsView({ onOpenInLab }: { onOpenInLab: (id: string) => void }) {
   const { experiments, refreshExperiments, loadExperimentIntoQrng } = useStore()
   const [openId, setOpenId] = useState<string | null>(null)
 
   return (
-    <section className="panel">
+    <section className="panel" style={{ marginTop: 20 }}>
       <header className="panel-head">
-        <span className="idx">01</span>
-        <span className="ttl">Experiment history</span>
-        <span className="note micro">
+        <h2 className="panel-title">Experiment history</h2>
+        <span className="panel-note">
           {experiments.length} records · persisted server-side (JSONL)
         </span>
+        <div className="btn-row">
+          <button className="btn small" onClick={() => void refreshExperiments()}>
+            refresh
+          </button>
+        </div>
       </header>
-      <div className="panel-body tight">
+      <div className="panel-body tight" style={{ overflowX: 'auto' }}>
         <table className="lab">
           <thead>
             <tr>
@@ -42,22 +53,14 @@ export function ExperimentsView({ onOpenInLab }: { onOpenInLab: (id: string) => 
                 <td>{e.experiment_id}</td>
                 <td>{e.kind.toUpperCase()}</td>
                 <td>
-                  {e.source === 'quantum_hardware' ? (
-                    <b style={{ color: 'var(--red)' }}>HW</b>
-                  ) : e.source === 'quantum_simulator' ? (
-                    'SIM'
-                  ) : (
-                    'CLASSICAL'
-                  )}
+                  <SourceChip source={e.source} />
                 </td>
                 <td>{e.backend ?? e.provider ?? '—'}</td>
                 <td>
                   <StatusChip state={e.status} />
                 </td>
                 <td>{e.shots ? `${e.shots} shots` : `${e.bit_count} bits`}</td>
-                <td>
-                  {e.zero_count !== null ? `${e.zero_count} : ${e.one_count}` : '—'}
-                </td>
+                <td>{e.zero_count !== null ? `${e.zero_count} : ${e.one_count}` : '—'}</td>
                 <td>{e.created_at.replace('T', ' ').replace('Z', '')}</td>
                 <td>
                   {e.kind === 'qrng' && e.status === 'COMPLETED' && (
@@ -69,7 +72,7 @@ export function ExperimentsView({ onOpenInLab }: { onOpenInLab: (id: string) => 
                         onOpenInLab(e.experiment_id)
                       }}
                     >
-                      replay in lab
+                      open in lab
                     </button>
                   )}
                 </td>
@@ -77,17 +80,16 @@ export function ExperimentsView({ onOpenInLab }: { onOpenInLab: (id: string) => 
             ))}
             {experiments.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--ink-50)' }}>
+                <td colSpan={9} style={{ padding: 28, textAlign: 'center', color: 'var(--text-2)' }}>
                   no experiments yet — run PRNG or QRNG in the Lab
                 </td>
               </tr>
             )}
           </tbody>
         </table>
-        <div className="btn-row" style={{ padding: '10px 10px 4px' }}>
-          <button className="btn small" onClick={() => void refreshExperiments()}>
-            refresh
-          </button>
+        <div className="stage-note" style={{ padding: '10px 4px 4px' }}>
+          full records incl. bitstreams, provenance and lifecycle history are stored server-side —
+          “open in lab” reloads a completed QRNG run exactly as it was returned
         </div>
       </div>
     </section>

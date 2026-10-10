@@ -1,4 +1,5 @@
-/* App shell — masthead, hash routing, footer.
+/* App shell — instrument header (identity · nav · truthful hardware status ·
+ * PRNG/QRNG mode selector), hash routing, footer.
  * Routes: #/lab (default) · #/compare · #/experiments */
 
 import { useEffect, useState } from 'react'
@@ -15,9 +16,46 @@ function routeFromHash(): Route {
   return 'lab'
 }
 
+function BrandMark() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden className="brand-mark">
+      <circle cx="15" cy="15" r="12.5" fill="none" stroke="#2d3945" strokeWidth="1.4" />
+      <ellipse cx="15" cy="15" rx="12.5" ry="4.4" fill="none" stroke="#2d3945" strokeWidth="1" />
+      <line x1="15" y1="2.5" x2="15" y2="27.5" stroke="#3a4c60" strokeWidth="1" />
+      <line x1="15" y1="15" x2="24.5" y2="7.5" stroke="#2ee6c8" strokeWidth="2" />
+      <circle cx="24.5" cy="7.5" r="2.4" fill="#2ee6c8" />
+      <circle cx="15" cy="2.5" r="1.5" fill="#e9eef4" />
+    </svg>
+  )
+}
+
+function HardwareIndicator() {
+  const { config, configError } = useStore()
+  let cls = ''
+  let text = 'connecting…'
+  if (configError) {
+    cls = 'down'
+    text = 'backend unreachable'
+  } else if (config) {
+    if (config.hardware.available) {
+      cls = 'live'
+      text = `QPU ready · ${config.hardware.label}`
+    } else {
+      cls = 'off'
+      text = 'simulator only · setup required'
+    }
+  }
+  return (
+    <span className={`hw-indicator ${cls}`} title={config?.hardware.reason ?? configError ?? ''}>
+      <span className="led" />
+      {text}
+    </span>
+  )
+}
+
 function Shell() {
   const [route, setRoute] = useState<Route>(routeFromHash)
-  const { loadExperimentIntoQrng } = useStore()
+  const { labMode, setLabMode, loadExperimentIntoQrng, config } = useStore()
 
   useEffect(() => {
     const onHash = () => setRoute(routeFromHash())
@@ -36,87 +74,90 @@ function Shell() {
   }
 
   return (
-    <div className="frame">
-      <header className="masthead">
-        <div className="masthead-top">
-          <div>
-            <h1 className="display masthead-title">
-              Quantum
-              <br />
-              Randomness
-              <span className="thin"> Lab</span>
-            </h1>
+    <div>
+      <header className="app-header">
+        <div className="frame app-header-inner">
+          <div className="brand">
+            <BrandMark />
+            <div className="brand-name">
+              Quantum Randomness Lab
+              <small>qrng · prng · provenance visible</small>
+            </div>
           </div>
-          <div className="masthead-side">
-            <span className="micro">PS AQVH910 · visual laboratory</span>
-            <span className="micro">|0⟩ → H → M · source-visible randomness</span>
-          </div>
-        </div>
-        <div className="masthead-spec">
-          <span className="spec-glyphs" aria-hidden>
-            {/* qubit → H → meter → bits — the whole product in four glyphs */}
-            <svg width="26" height="26" viewBox="0 0 26 26">
-              <circle cx="13" cy="13" r="11" fill="none" stroke="#1a1712" strokeWidth="2" />
-              <circle cx="13" cy="13" r="3.5" fill="#1a1712" />
-            </svg>
-            <span className="mono" style={{ fontSize: 13 }}>→</span>
-            <svg width="26" height="26" viewBox="0 0 26 26">
-              <rect x="2" y="2" width="22" height="22" fill="#1a1712" />
-              <text x="13" y="19" textAnchor="middle" fontFamily="ui-monospace, monospace" fontSize="14" fontWeight="700" fill="#f4f0e6">H</text>
-            </svg>
-            <span className="mono" style={{ fontSize: 13 }}>→</span>
-            <svg width="26" height="26" viewBox="0 0 26 26">
-              <path d="M 3 18 A 10 10 0 0 1 23 18" fill="none" stroke="#ff3e00" strokeWidth="2.5" />
-              <line x1="13" y1="18" x2="7" y2="25" stroke="#ff3e00" strokeWidth="2.5" />
-            </svg>
-            <span className="mono" style={{ fontSize: 13 }}>→</span>
-            <svg width="46" height="26" viewBox="0 0 46 26">
-              {[0, 1, 2, 3, 4, 5].map((i) => (
-                <rect
-                  key={i}
-                  x={i * 8}
-                  y={i % 2 === 0 ? 4 : 12}
-                  width="6"
-                  height="6"
-                  fill={i % 3 === 0 ? 'none' : '#1a1712'}
-                  stroke="#1a1712"
-                  strokeWidth="1.5"
-                />
-              ))}
-            </svg>
-          </span>
-          <nav className="mainnav">
-            <a href="#/lab" className={route === 'lab' ? 'active' : ''} onClick={() => go('lab')}>
-              Lab
-            </a>
-            <a href="#/compare" className={route === 'compare' ? 'active' : ''} onClick={() => go('compare')}>
-              Compare
-            </a>
-            <a
-              href="#/experiments"
-              className={route === 'experiments' ? 'active' : ''}
-              onClick={() => go('experiments')}
-            >
-              Experiments
-            </a>
+          <nav className="nav-tabs" aria-label="main navigation">
+            {(['lab', 'compare', 'experiments'] as const).map((r) => (
+              <a
+                key={r}
+                href={`#/${r}`}
+                className={`nav-tab ${route === r ? 'active' : ''}`}
+                onClick={() => go(r)}
+              >
+                {r}
+              </a>
+            ))}
           </nav>
+          <div className="header-right">
+            <HardwareIndicator />
+            {route === 'lab' && (
+              <div className="mode-switch" role="tablist" aria-label="lab mode">
+                <button
+                  role="tab"
+                  aria-selected={labMode === 'prng'}
+                  className={labMode === 'prng' ? 'active' : ''}
+                  onClick={() => setLabMode('prng')}
+                >
+                  PRNG
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={labMode === 'qrng'}
+                  className={labMode === 'qrng' ? 'active' : ''}
+                  onClick={() => setLabMode('qrng')}
+                >
+                  QRNG
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      <main style={{ paddingBottom: 20 }}>
+      <div className="tagline-strip">
+        <div className="frame">
+          <span>
+            <b>make the generation of randomness visible</b> · |0⟩ → H → measure → bits
+          </span>
+          <span>
+            {config?.hardware.available ? (
+              <>
+                hardware <b>configured</b> — every QRNG bit is a physical QPU measurement
+              </>
+            ) : (
+              <>
+                hardware <b>not configured</b> — simulator only until credentials are set
+                server-side
+              </>
+            )}
+          </span>
+        </div>
+      </div>
+
+      <main className="frame" style={{ paddingBottom: 20 }}>
         {route === 'lab' && <LabView />}
         {route === 'compare' && <CompareView />}
         {route === 'experiments' && <ExperimentsView onOpenInLab={openInLab} />}
       </main>
 
       <footer className="footer">
-        <span className="micro">
-          truthful provenance · hardware first · no fake status · replay never invents bits
-        </span>
-        <span className="micro">
-          every “hardware” bit shown originates from returned QPU measurement data · credentials
-          stay server-side
-        </span>
+        <div className="frame" style={{ display: 'flex', flexWrap: 'wrap', gap: 20, justifyContent: 'space-between', width: '100%' }}>
+          <span>
+            truthful provenance · hardware first · no fake status · replay never invents bits
+          </span>
+          <span>
+            every “hardware” bit shown originates from returned QPU measurement data ·
+            credentials stay server-side
+          </span>
+        </div>
       </footer>
     </div>
   )

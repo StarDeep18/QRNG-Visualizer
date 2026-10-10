@@ -38,7 +38,11 @@ export interface PrngState {
   error: ApiError | null
 }
 
+export type LabMode = 'qrng' | 'prng'
+
 interface StoreValue {
+  labMode: LabMode
+  setLabMode: (m: LabMode) => void
   config: QrngConfig | null
   configError: string | null
   reloadConfig: () => Promise<void>
@@ -64,6 +68,7 @@ const StoreContext = createContext<StoreValue | null>(null)
 const MAX_PRNG_RUNS = 4
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const [labMode, setLabMode] = useState<LabMode>('qrng')
   const [config, setConfig] = useState<QrngConfig | null>(null)
   const [configError, setConfigError] = useState<string | null>(null)
   const [backends, setBackends] = useState<QrngBackends | null>(null)
@@ -237,6 +242,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<StoreValue>(
     () => ({
+      labMode,
+      setLabMode,
       config,
       configError,
       reloadConfig,
@@ -260,6 +267,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       refreshExperiments,
     }),
     [
+      labMode,
       config, configError, reloadConfig, backends, loadBackends,
       prngRuns, prngGenerating, prngError, generatePrng,
       qrngStatus, qrngResult, qrngSubmitting, qrngSubmitError, qrngPolling,
