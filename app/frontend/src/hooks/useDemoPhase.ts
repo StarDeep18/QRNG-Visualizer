@@ -12,7 +12,7 @@
 import { useEffect, useState } from 'react'
 import type { CircuitPhase } from '../viz/CircuitDiagram'
 
-export type DemoScope = 'full' | 'prep'
+export type DemoScope = 'full' | 'prep' | 'intro'
 
 /** dwell time per phase (ms) */
 const DWELL: Record<number, number> = {
@@ -45,7 +45,10 @@ export function useDemoPhase(
       setPhase(0)
       return
     }
-    const last = scope === 'prep' ? 2 : 4
+    const last = scope === 'full' ? 4 : 2
+    // 'intro' runs A→B→C once and holds at C (superposition) — used while a
+    // real job is in flight; 'prep' cycles A→B→C repeatedly.
+    if (scope === 'intro' && phase === 2) return
     const t = setTimeout(
       () => {
         if (phase === last) {

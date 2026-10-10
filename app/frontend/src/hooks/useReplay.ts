@@ -14,11 +14,11 @@ export const REPLAY_SPEEDS = [0.5, 1, 2, 4, 8] as const
 
 /** Sub-phase timings within one shot (fractions of the shot interval). */
 const PHASES: Array<{ phase: CircuitPhase; until: number }> = [
-  { phase: 0, until: 0.14 }, // |0⟩ definite
-  { phase: 1, until: 0.38 }, // applying H
-  { phase: 2, until: 0.64 }, // superposition
-  { phase: 3, until: 0.86 }, // measuring
-  { phase: 4, until: 1.0 }, // reveal bit
+  { phase: 0, until: 0.12 }, // |0⟩ definite
+  { phase: 1, until: 0.36 }, // applying H
+  { phase: 2, until: 0.6 }, // superposition
+  { phase: 3, until: 0.82 }, // measuring
+  { phase: 4, until: 1.0 }, // reveal + transfer bit
 ]
 
 const SNAP_PHASES: Array<{ phase: CircuitPhase; until: number }> = [
@@ -38,6 +38,8 @@ export interface ReplayApi {
   displayBit: '0' | '1' | null
   setSpeed: (s: number) => void
   toggle: () => void
+  play: () => void
+  restart: () => void
   step: () => void
   reset: () => void
   skipToEnd: () => void
@@ -84,6 +86,16 @@ export function useReplay(
   const toggle = useCallback(() => {
     setPlaying((p) => (index >= total ? false : !p))
   }, [index, total])
+
+  const play = useCallback(() => {
+    if (total > 0) setPlaying(true)
+  }, [total])
+
+  const restart = useCallback(() => {
+    setIndex(0)
+    setPhase(0)
+    if (total > 0) setPlaying(true)
+  }, [total])
 
   // play loop: advance shots at the chosen rate; within a shot, animate
   // phases with requestAnimationFrame (or snap under reduced motion)
@@ -138,6 +150,8 @@ export function useReplay(
     displayBit,
     setSpeed,
     toggle,
+    play,
+    restart,
     step,
     reset,
     skipToEnd,

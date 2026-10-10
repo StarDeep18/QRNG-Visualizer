@@ -67,28 +67,40 @@ Or just: `make bootstrap && make dev` / `make prod`.
 
 ---
 
-## The interface (redesign)
+## The interface (redesign v3 — the number is the product)
 
-A dark **"quantum instrument"** visual system: deep-charcoal background, graphite
-panels, Inter/JetBrains Mono type pairing, restrained cyan for active quantum
-state, blue for classical/simulator, amber for measurement outcomes.
+The core experience is **INPUT → GENERATION PROCESS → INDIVIDUAL BITS →
+BINARY NUMBER → DECIMAL RESULT**, centered on prominently displayed generated
+numbers (8-bit by default, 16/32-bit supported). Bit convention: the first
+returned measurement / first computed bit is the most significant bit of the
+register; everything is assembled with BigInt.
 
-- **Lab** — a real three.js Bloch-sphere scene (lazy-loaded, WebGL-fallback SVG,
-  reduced-motion aware) showing the circuit's state math: |0⟩ → H → |+⟩ →
-  measurement → collapse. A view-mode badge is always explicit about what the
-  scene reflects (ILLUSTRATIVE / QUEUED / RUNNING / RETURNED RESULTS / REPLAY) —
-  it is an explanatory visualization, never a claim about QPU internals.
-- **Generated bitstream** — first-class: the exact API-returned sequence in large
-  monospace binary (byte-grouped, offset gutters), a BigInt hex view with
-  documented nibble padding, or the dot grid; copy / TXT / JSON export;
-  expandable full output; totals with percentages.
-- **Quantum replay** — deterministic shot-by-shot replay of the returned record
-  (play/pause/step/speed/reset); the scene and circuit strip follow it.
-- **PRNG** — the deterministic pipeline (seed → SplitMix64 → MSB → stream) with
-  same-seed reproducibility shown side by side.
-- **Compare** — source, process, reproducibility and provenance for both sides,
-  with the statistics read honestly (near-50/50 is consistent with, not proof
-  of, quantum measurement).
+- **QRNG — the Quantum Measurement Lab (3D)** — a stylized three.js laboratory
+  apparatus: glass qubit chamber, Hadamard gate module with a travelling light
+  pulse and trail, translucent interference-like probability pathways, a
+  measurement detector with scanning ring + mechanical shutter, 0/1 output
+  lamps, and the binary register that receives the returned bits. Stage D shows
+  the real provider job status and never predicts the outcome; stage E replays
+  the actual returned measurements bit-by-bit into the register; stage F reveals
+  the number. An optional educational Bloch-sphere view of the state math is a
+  toggle away.
+- **PRNG — the Deterministic Engine (3D)** — a deliberately different, warm
+  brass/coral machine: a seed token enters interlocking gears and MIX/SHIFT/
+  GRAB stages that emit the returned bits into the same register. Same seed ⇒
+  same number, demonstrated side by side.
+- **Generated number panel** — the decimal hero (copy number / copy binary /
+  download result JSON), the binary register, width, source, job id,
+  measurement counts and observed distribution — all from the experiment
+  result, nothing hardcoded.
+- **Full measurement record** — the exact API-returned sequence in large
+  monospace binary (byte-grouped, offset gutters), BigInt hex view with
+  documented nibble padding, or the dot grid; copy / TXT / JSON; expandable.
+- **Compare** — both 3D scenes, both numbers at the same width, reproducibility,
+  distributions and provenance, with the statistics read honestly (near-50/50
+  is consistent with, not proof of, quantum measurement).
+- **Engineering** — scenes are lazy-loaded chunks (three.js never enters the
+  main bundle), GPU resources are disposed on unmount, reduced-motion snaps
+  animations, WebGL-less browsers get a 2D fallback, and mobile layouts stack.
 
 ## Real hardware smoke test (Milestone 2)
 
