@@ -126,7 +126,7 @@ class IQMConfig:
     (Cortex CLI / IQM user-management OAuth world).
     """
 
-    server_url: Optional[str]           # e.g. https://cocos.resonance.meetiqm.com (QPU appended per docs)
+    server_url: Optional[str]           # e.g. https://resonance.iqm.tech (QCs discovered live)
     access_token: Optional[str]
     refresh_token: Optional[str]        # optional — enables automatic refresh
     quantum_computer: Optional[str]     # optional QC id/alias when the server controls several

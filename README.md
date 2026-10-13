@@ -210,6 +210,13 @@ Selection is automatic: `provider_for_mode` picks IQM when
   exactly) followed by a Z-basis `measure`. The circuit is validated
   client-side against the live `get_dynamic_quantum_architecture()` — qubit
   names always come from the QPU, never invented.
+- **Quantum computers**: the server URL (`https://resonance.iqm.tech` for
+  IQM Resonance) controls several QPUs; the backend discovers them LIVE
+  (server-reported aliases + display names, e.g. emerald / garnet / sirius)
+  and exposes every REAL QPU as a backend choice with live qubit counts and
+  health. `:mock` quantum computers are simulators and are hard-rejected in
+  hardware mode. Selection order: explicit request (UI) >
+  `IQM_QUANTUM_COMPUTER` pin > deterministic first real QPU.
 - **Per-shot results**: bits are read from `get_job_measurements()` (per-shot
   `CircuitMeasurementResults`), never from aggregate counts. Bit order is
   shot order: first measurement = first bit (MSB of the displayed number).
