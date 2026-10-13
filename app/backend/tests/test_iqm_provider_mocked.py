@@ -43,6 +43,16 @@ from qlab.providers.iqm_provider import IQM_REGISTER_KEY, IQMProvider
 QUBIT = "QB1"
 
 
+@dataclass(frozen=True)
+class FakeQC:
+    alias: str
+    display_name: str
+
+    @property
+    def is_mock(self) -> bool:
+        return self.alias.endswith(":mock")
+
+
 def make_cfg(**overrides) -> IQMConfig:
     defaults = dict(
         server_url="https://cocos.resonance.meetiqm.com/garnet",
@@ -96,13 +106,21 @@ class FakeIQMClient:
                  fail_submit: Exception | None = None,
                  fail_status: Exception | None = None,
                  fail_measurements: Exception | None = None,
-                 status_sequence: list[str] | None = None) -> None:
+                 status_sequence: list[str] | None = None,
+                 quantum_computers: list[FakeQC] | None = None) -> None:
         self.shots_bits = shots_bits
         self.arch_qubits = arch_qubits or [QUBIT, "QB2"]
         self.fail_submit = fail_submit
         self.fail_status = fail_status
         self.fail_measurements = fail_measurements
         self.status_sequence = status_sequence or ["WAITING", "COMPLETED"]
+        # quantum computers the (fake) server reports — real QPUs + mocks
+        self.quantum_computers = quantum_computers or [
+            FakeQC("garnet", "IQM Garnet"),
+            FakeQC("garnet:mock", "IQM Garnet (mock)"),
+            FakeQC("sirius", "IQM Sirius"),
+            FakeQC("sirius:mock", "IQM Sirius (mock)"),
+        ]
         self.submitted: list[dict[str, Any]] = []
         self.trackers: dict[str, FakeTracker] = {}
         self.measurements_calls = 0
@@ -530,14 +548,59 @@ def test_5xx_translated_as_unavailable():
 # ---------------------------------------------------------------------------
 
 
-def test_backend_metadata_reports_real_qc_only():
+def test_backend_metadata_lists_real_qcs_and_excludes_mocks():
     provider = make_provider(client=FakeIQMClient(arch_qubits=["QB1", "QB2", "QB3"]))
     infos = provider.get_backend_metadata()
-    assert len(infos) == 1
-    assert infos[0].name == "garnet"
-    assert infos[0].simulator is False
-    assert infos[0].qubits == 3
-    assert infos[0].operational is True
+    # mocks are simulators — they must NEVER be offered in hardware mode
+    assert [i.name for i in infos] == ["garnet", "sirius"]
+    assert all(i.simulator is False for i in infos)
+    garnet = infos[0]
+    assert garnet.operational is True
+    assert garnet.qubits == 3
+    assert "IQM Garnet" in (garnet.status_message or "")
+
+
+def test_backend_metadata_single_qc_filter():
+    provider = make_provider()
+    infos = provider.get_backend_metadata(name="sirius")
+    assert [i.name for i in infos] == ["sirius"]
+
+
+def test_submit_selects_requested_real_qc():
+    client = FakeIQMClient()
+    provider = make_provider(client=client)
+    submission = provider.submit_job(provider.create_qrng_circuit(), shots=4, backend="sirius")
+    assert submission.backend == "sirius"
+
+
+def test_submit_rejects_mock_quantum_computer():
+    provider = make_provider()
+    with pytest.raises(ProviderError) as excinfo:
+        provider.submit_job(provider.create_qrng_circuit(), shots=4, backend="garnet:mock")
+    assert excinfo.value.code == "SIMULATOR_BACKEND_REJECTED"
+
+
+def test_submit_rejects_unknown_quantum_computer():
+    provider = make_provider()
+    with pytest.raises(ProviderError) as excinfo:
+        provider.submit_job(provider.create_qrng_circuit(), shots=4, backend="does_not_exist")
+    assert excinfo.value.code == "INVALID_BACKEND"
+    assert "garnet" in (excinfo.value.hint or "")    # real choices listed in the hint
+
+
+def test_submit_rejects_request_conflicting_with_pinned_qc():
+    provider = make_provider(cfg=make_cfg(quantum_computer="garnet"))
+    with pytest.raises(ProviderError) as excinfo:
+        provider.submit_job(provider.create_qrng_circuit(), shots=4, backend="sirius")
+    assert excinfo.value.code == "INVALID_BACKEND"
+    assert "IQM_QUANTUM_COMPUTER" in excinfo.value.message
+
+
+def test_pinned_quantum_computer_used_when_valid():
+    provider = make_provider(cfg=make_cfg(quantum_computer="sirius"))
+    assert provider.create_qrng_circuit().instructions[0].locus == (QUBIT,)
+    submission = provider.submit_job(provider.create_qrng_circuit(), shots=4)
+    assert submission.backend == "sirius"
 
 
 def test_provider_for_mode_prefers_iqm_when_configured(monkeypatch):

@@ -3,13 +3,23 @@
 Executes the fixed QRNG circuit (|0⟩ → H → measure) on a real IQM QPU
 using the *native* IQM circuit format (``iqm.pulse.Circuit``), because the
 ``qiskit-iqm`` adapter's qiskit pin conflicts with this project's qiskit
-version (see docs/DECISIONS notes in README). The math is exact:
+version. The math is exact:
 
     H = R_y(π/2) · Z  and  Z|0⟩ = |0⟩
     ⇒  prx(angle=π/2, phase=π/2) ≡ R_y(π/2) on |0⟩ prepares |+⟩ = H|0⟩
 
 so ``prx(π/2, π/2)`` followed by a Z-basis ``measure`` is *exactly* the
 approved QRNG circuit — no approximation, no adapter needed.
+
+Quantum-computer handling (verified against IQM Resonance, iqm-client 36):
+  * ``IQM_SERVER_URL`` points at the server (e.g. https://resonance.iqm.tech).
+  * The server reports the quantum computers it controls (real QPUs and
+    ``:mock`` simulators). We discover them LIVE and expose every REAL QPU
+    as a backend choice; ``:mock`` aliases are rejected in hardware mode
+    (they are simulators — hardware mode must never silently use one).
+  * Selection order: explicit request (API backend parameter) > pinned
+    ``IQM_QUANTUM_COMPUTER`` > deterministic default (first real QPU in
+    server order). Names are never invented.
 
 Non-negotiable rules implemented here (mirrors ibm_provider.py):
   * Bits returned by get_job_result() come ONLY from the provider's
@@ -34,6 +44,7 @@ import math
 import threading
 import time
 import uuid as uuid_mod
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from ..config import IQMConfig, load_iqm_config, redact
@@ -63,9 +74,11 @@ IQM_REGISTER_KEY = "qrng_bit"
 
 # proactive refresh margin: refresh when the access token has less than this left
 _REFRESH_MARGIN_S = 120.0
-# TTL for the cached dynamic quantum architecture (qubit names must be real,
-# but they only change with a new calibration — a short cache is honest)
+# TTLs for live server state (qubit names / QC lists only change with new
+# calibrations or maintenance — short caches are honest and cheap)
 _ARCH_CACHE_TTL = 300.0
+_QC_LIST_CACHE_TTL = 60.0
+_BACKENDS_CACHE_TTL = 120.0
 _AUTH_REQUEST_TIMEOUT_S = 20.0
 
 
@@ -87,6 +100,18 @@ def _jwt_seconds_left(token: Optional[str]) -> float:
         return float("inf")            # cannot parse — assume it stays valid
 
 
+@dataclass(frozen=True)
+class _QC:
+    """A quantum computer reported by the IQM server (never invented)."""
+
+    alias: str                        # API selector, e.g. "garnet"
+    display_name: str                 # UI name from the server, e.g. "IQM Garnet"
+
+    @property
+    def is_mock(self) -> bool:
+        return self.alias.endswith(":mock")
+
+
 class IQMProvider(QuantumProvider):
     name = "iqm"
     label = "IQM Quantum — real QPU hardware"
@@ -95,11 +120,10 @@ class IQMProvider(QuantumProvider):
     NOT_CONFIGURED_REASON = "IQM_SERVER_URL / IQM_ACCESS_TOKEN are not set on the server"
     SETUP_HINT = IQM_CREDENTIALS_HINT
     SETUP_STEPS = [
-        "Create an IQM Resonance account at resonance.meetiqm.com (or use your "
+        "Create an IQM Resonance account at resonance.iqm.tech (or use your "
         "on-prem IQM server) and obtain an access token — from the dashboard, or "
         "from `cortex auth login` if you have a Cortex tokens file",
-        "Copy your server URL (e.g. https://cocos.resonance.meetiqm.com/<qpu>) "
-        "and the access token",
+        "Copy your server URL (e.g. https://resonance.iqm.tech) and the access token",
         "Put them in app/backend/.env: IQM_SERVER_URL=… and IQM_ACCESS_TOKEN=… "
         "(optionally IQM_REFRESH_TOKEN=… to enable automatic refresh). "
         "The server picks them up on the next submission — no restart needed",
@@ -113,16 +137,20 @@ class IQMProvider(QuantumProvider):
         self._config_loader = config_loader
         self._client_factory = client_factory          # tests: fake IQMClient
         self._refresh_client = refresh_client          # tests: fake requests-like
-        self._client: Any = None
-        self._client_key: Optional[tuple] = None       # (url, token id, qc) the client was built for
         self._lock = threading.RLock()
         # in-memory token state (never logged, never returned)
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
         self._token_source: Optional[str] = None       # config access token the state came from
+        # per-quantum-computer client cache, invalidated when the token changes
+        self._clients: dict[Optional[str], Any] = {}
+        self._clients_key: Optional[tuple] = None      # (server_url, access_token)
+        # live server state caches
+        self._qc_cache: Optional[tuple[float, list[_QC]]] = None
+        self._arch_cache: dict[Optional[str], tuple[float, Any]] = {}
+        self._backends_cache: Optional[tuple[float, list[BackendInfo]]] = None
         self._trackers: dict[str, Any] = {}            # provider_job_id -> CircuitJobTracker
         self._submit_meta: dict[str, dict[str, Any]] = {}
-        self._arch_cache: Optional[tuple[float, Any, Optional[str]]] = None  # (ts, arch, qc)
 
     # ------------------------------------------------------------------ config
 
@@ -139,39 +167,42 @@ class IQMProvider(QuantumProvider):
             )
         return cfg
 
-    # ------------------------------------------------------------------ client
+    # ------------------------------------------------------------------ clients
 
-    def _get_client(self, cfg: Optional[IQMConfig] = None) -> Any:
-        """Build (or reuse) an IQMClient for the CURRENT in-memory token state.
+    def _construct_client(self, cfg: IQMConfig, qc: Optional[str]) -> Any:
+        """Build a raw IQMClient. May raise the SDK's ClientConfigurationError
+        (e.g. when the server controls several QPUs and none was chosen) —
+        callers decide how to translate/parse it."""
+        if self._client_factory is not None:
+            return self._client_factory(url=cfg.server_url, quantum_computer=qc,
+                                        token=self._access_token)
+        from iqm.iqm_client import IQMClient
 
-        The client is rebuilt whenever the config's token changes (operator
-        edited .env) or whenever we refreshed the access token ourselves.
-        """
+        return IQMClient.from_url(cfg.server_url, quantum_computer=qc,
+                                  token=self._access_token)
+
+    def _get_client(self, cfg: Optional[IQMConfig] = None,
+                    qc: Optional[str] = None) -> Any:
+        """Build (or reuse) an IQMClient for the CURRENT in-memory token state
+        and the given quantum computer. Rebuilt whenever the config's token
+        changes (operator edited .env) or we refreshed the access token."""
         cfg = cfg or self._require_config()
         with self._lock:
             self._sync_tokens(cfg)
-            key = (cfg.server_url, self._access_token, cfg.quantum_computer)
-            if self._client is not None and self._client_key == key:
-                return self._client
+            key = (cfg.server_url, self._access_token)
+            if self._clients_key != key:
+                self._clients = {}
+                self._clients_key = key
+                self._qc_cache = None
+                self._arch_cache = {}
+                self._backends_cache = None
+            if qc in self._clients:
+                return self._clients[qc]
             try:
-                if self._client_factory is not None:
-                    client = self._client_factory(
-                        url=cfg.server_url,
-                        quantum_computer=cfg.quantum_computer,
-                        token=self._access_token,
-                    )
-                else:
-                    from iqm.iqm_client import IQMClient
-
-                    client = IQMClient.from_url(
-                        cfg.server_url,
-                        quantum_computer=cfg.quantum_computer,
-                        token=self._access_token,
-                    )
+                client = self._construct_client(cfg, qc)
             except Exception as exc:
                 raise self._translate(exc, "connecting to the IQM server") from exc
-            self._client = client
-            self._client_key = key
+            self._clients[qc] = client
             return client
 
     def _sync_tokens(self, cfg: IQMConfig) -> None:
@@ -181,8 +212,8 @@ class IQMProvider(QuantumProvider):
             self._access_token = cfg.access_token
             self._refresh_token = cfg.refresh_token
             self._token_source = cfg.access_token
-            self._client = None                # force rebuild for the new token
-            self._client_key = None
+            self._clients = {}                # force rebuild for the new token
+            self._clients_key = None
 
     # ------------------------------------------------------------------ refresh
 
@@ -273,8 +304,11 @@ class IQMProvider(QuantumProvider):
             self._access_token = new_access
             if payload.get("refresh_token"):
                 self._refresh_token = payload["refresh_token"]
-            self._client = None                # rebuild client with the new token
-            self._client_key = None
+            self._clients = {}                # rebuild clients with the new token
+            self._clients_key = None
+            self._qc_cache = None
+            self._arch_cache = {}
+            self._backends_cache = None
             return True
 
     def _is_auth_error(self, exc: Exception) -> bool:
@@ -285,8 +319,8 @@ class IQMProvider(QuantumProvider):
         name = type(exc).__name__.lower()
         return "auth" in name and "error" in name
 
-    def _call(self, action: str, fn: Callable[[Any], Any],
-              *, allow_refresh_retry: bool = True) -> Any:
+    def _call(self, action: str, fn: Callable[[Any], Any], *,
+              allow_refresh_retry: bool = True, qc: Optional[str] = None) -> Any:
         """Run ``fn(client)`` with proactive + reactive token refresh.
 
         A 401-class rejection means the request was NOT executed (no job
@@ -295,18 +329,130 @@ class IQMProvider(QuantumProvider):
         decides what is safe to repeat.
         """
         cfg = self._require_config()
+        if qc is None:
+            qc = self._resolve_qc(cfg)
         self._maybe_refresh(cfg)
         try:
-            return fn(self._get_client(cfg))
+            return fn(self._get_client(cfg, qc))
         except Exception as exc:
             if allow_refresh_retry and cfg.refresh_token and self._is_auth_error(exc):
                 refreshed = self._maybe_refresh(cfg, force=True)
                 if refreshed:
                     try:
-                        return fn(self._get_client(cfg))
+                        return fn(self._get_client(cfg, qc))
                     except Exception as exc2:
                         raise self._translate(exc2, action) from exc2
             raise self._translate(exc, action) from exc
+
+    # ------------------------------------------------------------------ quantum computers
+
+    def _discover_qcs(self, cfg: IQMConfig) -> list[_QC]:
+        """LIVE quantum-computer list from the server (aliases + display names).
+
+        Discovery path for multi-QPU servers (e.g. IQM Resonance): building a
+        client without a quantum_computer raises ClientConfigurationError
+        whose message lists the available aliases — we parse it, then ask a
+        real client for the full list (display names, ids).
+        """
+        now = time.monotonic()
+        with self._lock:
+            if self._qc_cache is not None and now - self._qc_cache[0] < _QC_LIST_CACHE_TTL:
+                return self._qc_cache[1]
+            self._sync_tokens(cfg)
+
+        qcs: list[_QC] = []
+        try:
+            client = self._construct_client(cfg, None)   # single-QPU server: works
+        except Exception as exc:
+            message = str(exc)
+            marker = "Available quantum computers are:"
+            if marker not in message:
+                raise self._translate(exc, "connecting to the IQM server") from exc
+            aliases = [a.strip() for a in message.split(marker, 1)[1].split(",") if a.strip()]
+            qcs = [_QC(alias=a, display_name=a) for a in aliases]
+            first_real = next((a for a in aliases if not a.endswith(":mock")), None)
+            if first_real is None:
+                raise ProviderError(
+                    "PROVIDER_UNAVAILABLE",
+                    "The IQM server reports no real quantum computers (only mocks).",
+                    "Hardware mode requires a real QPU — mocks are simulators.",
+                )
+            try:
+                client = self._construct_client(cfg, first_real)
+            except Exception:
+                # the parsed aliases alone are enough to operate
+                with self._lock:
+                    self._qc_cache = (now, qcs)
+                return qcs
+            else:
+                upgraded = self._qcs_from_client(client)     # full list: ids + display names
+                if upgraded:
+                    qcs = upgraded
+        else:
+            if not qcs:
+                qcs = self._qcs_from_client(client)
+
+        with self._lock:
+            self._qc_cache = (now, qcs)
+        return qcs
+
+    @staticmethod
+    def _qcs_from_client(client: Any) -> list[_QC]:
+        """Quantum-computer list from a constructed client (real SDK or fake)."""
+        listed = getattr(client, "quantum_computers", None)     # test fakes
+        if listed is not None:
+            return [
+                _QC(alias=qc.alias, display_name=getattr(qc, "display_name", qc.alias))
+                for qc in listed
+            ]
+        try:                                                     # real SDK v36
+            inner = getattr(getattr(client, "_executor", None), "client", None)
+            if inner is not None:
+                return [
+                    _QC(alias=qc.alias, display_name=qc.display_name)
+                    for qc in inner._get_quantum_computers()
+                ]
+        except Exception:
+            pass
+        return []
+
+    def _resolve_qc(self, cfg: IQMConfig, requested: Optional[str] = None) -> Optional[str]:
+        """Effective quantum computer alias for a call.
+
+        Precedence: explicit request > pinned config (IQM_QUANTUM_COMPUTER) >
+        deterministic default (first REAL QPU in server order). ``None`` means
+        "let the server decide" (single-QPU servers). Mocks are always
+        rejected — hardware mode must never run on a simulator.
+        """
+        qcs = self._discover_qcs(cfg)
+        aliases = {qc.alias for qc in qcs}
+        real = [qc for qc in qcs if not qc.is_mock]
+
+        choice = requested or cfg.quantum_computer
+        if choice and choice != "auto":
+            if aliases and choice not in aliases:
+                raise ProviderError(
+                    "INVALID_BACKEND",
+                    f"Quantum computer '{choice}' does not exist on this IQM server.",
+                    f"Real quantum computers available: {', '.join(qc.alias for qc in real) or 'none'}."
+                    if real else "No real quantum computer is currently available.",
+                )
+            if choice.endswith(":mock"):
+                raise ProviderError(
+                    "SIMULATOR_BACKEND_REJECTED",
+                    f"'{choice}' is a mock quantum computer — hardware mode requires a real QPU.",
+                    "Pick a real quantum computer (no ':mock' suffix) or use AUTO selection.",
+                )
+            return choice
+        if not qcs:
+            return None                     # server not asked yet / single-QPU server
+        if not real:
+            raise ProviderError(
+                "PROVIDER_UNAVAILABLE",
+                "The IQM server reports no real quantum computers (only mocks).",
+                "Hardware mode requires a real QPU. Check your IQM Resonance subscription.",
+            )
+        return real[0].alias
 
     # ------------------------------------------------------------------ circuit
 
@@ -316,7 +462,7 @@ class IQMProvider(QuantumProvider):
         The qubit name is taken from the LIVE dynamic quantum architecture
         (cached briefly) — never invented. Returns an ``iqm.pulse.Circuit``.
         """
-        qubit, _arch = self._select_qubit()
+        qubit, _arch, _qc = self._select_qubit()
         return self._build_circuit(qubit)
 
     @staticmethod
@@ -379,88 +525,106 @@ class IQMProvider(QuantumProvider):
 
     # ------------------------------------------------------------------ architecture / backends
 
-    def _architecture(self) -> tuple[float, Any, Optional[str]]:
-        """Live dynamic quantum architecture (qubit names + native ops), cached."""
+    def _architecture(self, qc: Optional[str] = None) -> tuple[float, Any, Optional[str]]:
+        """Live dynamic quantum architecture (qubit names + native ops), cached
+        per quantum computer."""
         cfg = self._require_config()
+        if qc is None:
+            qc = self._resolve_qc(cfg)
         now = time.monotonic()
         with self._lock:
-            if (
-                self._arch_cache is not None
-                and now - self._arch_cache[0] < _ARCH_CACHE_TTL
-                and self._arch_cache[2] == cfg.quantum_computer
-            ):
-                return self._arch_cache
+            cached = self._arch_cache.get(qc)
+            if cached is not None and now - cached[0] < _ARCH_CACHE_TTL:
+                return cached[0], cached[1], qc
         arch = self._call(
             "fetching the IQM quantum architecture",
             lambda client: client.get_dynamic_quantum_architecture(),
+            qc=qc,
         )
         with self._lock:
-            self._arch_cache = (now, arch, cfg.quantum_computer)
-        return self._arch_cache
+            self._arch_cache[qc] = (now, arch)
+        return now, arch, qc
 
-    def _select_qubit(self) -> tuple[str, Any]:
+    def _select_qubit(self) -> tuple[str, Any, Optional[str]]:
         """Deterministic qubit choice: configured qubit if it exists live,
         else the FIRST qubit of the live architecture (server order)."""
         cfg = self._require_config()
-        _ts, arch, _qc = self._architecture()
+        qc = self._resolve_qc(cfg)
+        _ts, arch, qc = self._architecture(qc)
         qubits = list(getattr(arch, "qubits", ()) or [])
         if not qubits:
             raise ProviderError(
                 "PROVIDER_UNAVAILABLE",
-                "The IQM server reported a quantum architecture with no qubits.",
+                f"The IQM server reported a quantum architecture with no qubits for '{qc}'.",
                 "The QPU may be under maintenance — check IQM Resonance status.",
             )
         if cfg.qubit:
             if cfg.qubit not in qubits:
                 raise ProviderError(
                     "INVALID_BACKEND",
-                    f"Configured IQM_QUBIT '{cfg.qubit}' does not exist on this QPU "
+                    f"Configured IQM_QUBIT '{cfg.qubit}' does not exist on '{qc}' "
                     f"(live qubits: {', '.join(qubits[:8])}…).",
                     "Remove IQM_QUBIT from .env to use automatic selection, or set a "
                     "real qubit name from the live architecture.",
                 )
-            return cfg.qubit, arch
-        return qubits[0], arch
+            return cfg.qubit, arch, qc
+        return qubits[0], arch, qc
 
     def get_backend_metadata(self, name: Optional[str] = None) -> list[BackendInfo]:
-        """The ACTUAL quantum computer this server URL + config addresses.
+        """REAL quantum computers this server controls, with live metadata.
 
-        iqm-client v36 has no 'list all quantum computers' call, so we report
-        the one real QC we can verify live: its qubit count and health come
-        from the server. Names are never invented.
+        Every entry's name is the server-reported alias, qubit count and
+        health come from live calls, and ``:mock`` (simulator) quantum
+        computers are excluded — hardware mode must never offer them.
         """
         cfg = self._require_config()
-        _ts, arch, _qc = self._architecture()
-        qc_name = self._backend_name(cfg)
-        qubits = len(getattr(arch, "qubits", ()) or [])
-        healthy = True
-        status_message = "IQM quantum computer (live architecture verified)"
-        try:
-            health = self._call("checking IQM server health", lambda client: client.get_health())
-            if health:
-                status_message = f"IQM server health: {redact(json.dumps(health)[:160])}"
-        except ProviderError as exc:
-            healthy = False
-            status_message = redact(exc.message)
-        return [
-            BackendInfo(
-                name=qc_name,
-                simulator=False,
-                operational=healthy,
-                pending_jobs=None,            # IQM does not expose queue depth — never fabricated
-                qubits=qubits,
-                status_message=status_message,
-            )
-        ]
-
-    @staticmethod
-    def _backend_name(cfg: IQMConfig) -> str:
-        if cfg.quantum_computer:
-            return cfg.quantum_computer
-        # derive an honest display name from the server URL tail
-        # e.g. https://cocos.resonance.meetiqm.com/garnet → cocos.resonance…/garnet
-        tail = (cfg.server_url or "").rstrip("/").rsplit("/", 1)[-1] or (cfg.server_url or "iqm-server")
-        return tail
+        now = time.monotonic()
+        with self._lock:
+            if self._backends_cache is not None and now - self._backends_cache[0] < _BACKENDS_CACHE_TTL:
+                infos = self._backends_cache[1]
+                return [i for i in infos if name in (None, i.name)]
+        qcs = [qc for qc in self._discover_qcs(cfg) if not qc.is_mock]
+        infos: list[BackendInfo] = []
+        for qc in qcs:
+            try:
+                _ts, arch, _ = self._architecture(qc.alias)
+                qubits = len(getattr(arch, "qubits", ()) or [])
+                healthy, message = True, f"{qc.display_name} — live architecture verified"
+                try:
+                    health = self._call(
+                        f"checking health of quantum computer '{qc.alias}'",
+                        lambda client: client.get_health(), qc=qc.alias,
+                    )
+                    if isinstance(health, dict):
+                        status = health.get("operational_status")
+                        nested = health.get("health") or {}
+                        if status and str(status).lower() not in ("online", "ok"):
+                            healthy, message = False, f"{qc.display_name} — status: {status}"
+                        elif "healthy" in nested and not nested["healthy"]:
+                            healthy = False
+                            message = f"{qc.display_name} — server reports unhealthy"
+                except ProviderError as exc:
+                    healthy, message = False, f"{qc.display_name} — {redact(exc.message)}"
+                infos.append(BackendInfo(
+                    name=qc.alias,
+                    simulator=False,
+                    operational=healthy,
+                    pending_jobs=None,        # IQM does not expose queue depth — never fabricated
+                    qubits=qubits,
+                    status_message=message,
+                ))
+            except ProviderError as exc:
+                infos.append(BackendInfo(
+                    name=qc.alias,
+                    simulator=False,
+                    operational=False,
+                    pending_jobs=None,
+                    qubits=None,
+                    status_message=f"{qc.display_name} — {redact(exc.message)}",
+                ))
+        with self._lock:
+            self._backends_cache = (now, infos)
+        return [i for i in infos if name in (None, i.name)]
 
     # ------------------------------------------------------------------ submit
 
@@ -480,16 +644,17 @@ class IQMProvider(QuantumProvider):
         self.validate_circuit(circuit)
         cfg = self._require_config()
 
-        # a different backend name = a different quantum computer on this server
-        if backend and backend not in ("auto", self._backend_name(cfg)):
-            if cfg.quantum_computer:
-                raise ProviderError(
-                    "INVALID_BACKEND",
-                    f"Backend '{backend}' does not match this IQM configuration.",
-                    f"This server is pinned to '{self._backend_name(cfg)}' via "
-                    "IQM_QUANTUM_COMPUTER / IQM_SERVER_URL. Adjust .env to change QPU.",
-                )
-            cfg = self._with_quantum_computer(backend)
+        # resolve the quantum computer: explicit request > pinned config > default
+        requested = backend if backend not in (None, "auto") else None
+        if requested and cfg.quantum_computer and requested != cfg.quantum_computer:
+            raise ProviderError(
+                "INVALID_BACKEND",
+                f"Backend '{requested}' conflicts with the pinned IQM_QUANTUM_COMPUTER "
+                f"'{cfg.quantum_computer}'.",
+                "Remove the pin from .env to allow choosing a quantum computer per job.",
+            )
+        qc = self._resolve_qc(cfg, requested)
+        qubit = circuit.instructions[0].locus[0]
 
         # refresh BEFORE submitting: a rejected submission never creates a job,
         # so this proactive refresh also guarantees the retry below is safe
@@ -499,46 +664,39 @@ class IQMProvider(QuantumProvider):
             return client.submit_circuits([circuit], shots=shots)
 
         try:
-            tracker = self._call(f"submitting to IQM quantum computer '{self._backend_name(cfg)}'", _do_submit)
+            tracker = self._call(
+                f"submitting to IQM quantum computer '{qc or 'default'}'", _do_submit, qc=qc
+            )
             provider_job_id = str(tracker.job_id)
         except ProviderRateLimited:
             raise
         except ProviderError:
             raise                          # already translated (incl. auth retry inside _call)
 
+        backend_name = qc or self._url_tail(cfg)
         with self._lock:
             self._trackers[provider_job_id] = tracker
             self._submit_meta[provider_job_id] = {
-                "backend": self._backend_name(cfg),
+                "backend": backend_name,
+                "qc": qc,
                 "shots": shots,
                 "submitted_at": time.time(),
             }
         return ProviderSubmission(
             provider_job_id=provider_job_id,
-            backend=self._backend_name(cfg),
+            backend=backend_name,
             submitted_at=str(tracker.job_id),
             transpiled_ops=[
-                f"prx(π/2, π/2) @ {circuit.instructions[0].locus[0]}",
-                f"measure → '{IQM_REGISTER_KEY}' @ {circuit.instructions[0].locus[0]}",
+                f"prx(π/2, π/2) @ {qubit}",
+                f"measure → '{IQM_REGISTER_KEY}' @ {qubit}",
             ],
             raw={"provider": "iqm"},
         )
 
-    def _with_quantum_computer(self, name: str) -> IQMConfig:
-        """Reconfigured config selecting a specific quantum computer."""
-        base = self._require_config()
-        return IQMConfig(
-            server_url=base.server_url,
-            access_token=base.access_token,
-            refresh_token=base.refresh_token,
-            quantum_computer=name,
-            qubit=base.qubit,
-            auth_token_url=base.auth_token_url,
-            auth_server_url=base.auth_server_url,
-            auth_realm=base.auth_realm,
-            auth_client_id=base.auth_client_id,
-            auth_client_secret=base.auth_client_secret,
-        )
+    @staticmethod
+    def _url_tail(cfg: IQMConfig) -> str:
+        # honest fallback display name derived from the server URL
+        return (cfg.server_url or "").rstrip("/").rsplit("/", 1)[-1] or "iqm-server"
 
     # ------------------------------------------------------------------ status
 
@@ -547,11 +705,18 @@ class IQMProvider(QuantumProvider):
             tracker = self._trackers.get(provider_job_id)
         if tracker is not None:
             return tracker
-        # re-attach after a restart: ask the server for the job
+        # re-attach after a restart: ask the server for the job (on the quantum
+        # computer it was submitted to, when we know it)
+        cfg = self._require_config()
+        with self._lock:
+            qc = (self._submit_meta.get(provider_job_id) or {}).get("qc")
+        if qc is None:
+            qc = self._resolve_qc(cfg)
+
         def _fetch(client: Any) -> Any:
             return client.get_job(uuid_mod.UUID(provider_job_id))
 
-        tracker = self._call(f"fetching IQM job '{provider_job_id}'", _fetch)
+        tracker = self._call(f"fetching IQM job '{provider_job_id}'", _fetch, qc=qc)
         with self._lock:
             self._trackers[provider_job_id] = tracker
         return tracker
@@ -596,7 +761,8 @@ class IQMProvider(QuantumProvider):
         results = self._call(f"retrieving IQM measurements for job '{provider_job_id}'", _measurements)
         bits, counts = self._extract_bits(results, shots)
 
-        meta = self._submit_meta.get(provider_job_id, {})
+        with self._lock:
+            meta = dict(self._submit_meta.get(provider_job_id) or {})
         cfg = self._config_loader()
         metadata: dict[str, Any] = {
             "job_id": provider_job_id,
@@ -604,11 +770,19 @@ class IQMProvider(QuantumProvider):
             "measurement_retrieval": "per-shot (get_job_measurements)",
             "bit_order": "shot order, first shot = first bit",
         }
-        if self._arch_cache is not None:
-            calibration = getattr(self._arch_cache[1], "calibration_set_id", None)
+        qc = meta.get("qc")
+        if qc:
+            cached = self._arch_cache.get(qc)
+            calibration = getattr(cached[1], "calibration_set_id", None) if cached else None
             if calibration:
                 metadata["calibration_set_id"] = str(calibration)
-        backend_name = meta.get("backend") or self._backend_name(cfg)
+            display = next(
+                (q.display_name for q in (self._qc_cache[1] if self._qc_cache else []) if q.alias == qc),
+                None,
+            )
+            if display:
+                metadata["quantum_computer"] = display
+        backend_name = meta.get("backend") or (qc or self._url_tail(cfg))
         return ProviderResult(
             provider_job_id=provider_job_id,
             backend=backend_name,
