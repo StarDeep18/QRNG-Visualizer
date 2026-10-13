@@ -134,6 +134,11 @@ export function QrngPanel() {
             decimal={number?.decimal ?? null}
             badge={badge}
             statusText={status ? status.status.replace(/_/g, ' ') : 'submitting'}
+            providerName={
+              result?.source === 'quantum_hardware' && result.provider
+                ? `${providerLabel(result.provider)} `
+                : undefined
+            }
           />
         </div>
 

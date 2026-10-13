@@ -60,6 +60,7 @@ export function QrngScenePanel({
   decimal,
   badge,
   statusText,
+  providerName,
 }: {
   stage: LabStage
   replay: ReplayApi
@@ -68,6 +69,7 @@ export function QrngScenePanel({
   decimal: string | null
   badge: { text: string; tone: 'live' | 'result' | 'plain' }
   statusText: string
+  providerName?: string
 }) {
   const reducedMotion = usePrefersReducedMotion()
   const webgl = useMemo(detectWebGL, [])
@@ -115,7 +117,7 @@ export function QrngScenePanel({
           : stage === 'measuring'
             ? `real job in flight: ${statusText} — the result is not known until it is returned`
             : stage === 'replay'
-              ? `replaying returned measurements — bit ${Math.min(replay.index + (replay.playing ? 1 : 0), replay.total)}/${replay.total}`
+              ? `replaying returned ${providerName ?? ''}measurements — bit ${Math.min(replay.index + (replay.playing ? 1 : 0), replay.total)}/${replay.total}`
               : `register complete → ${decimal ?? '—'}`
 
   const currentIdx = STAGES.findIndex((s) => s.key === stage)
