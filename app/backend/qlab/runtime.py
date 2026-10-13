@@ -28,11 +28,14 @@ class Runtime:
     circuit: dict = field(default_factory=circuit_spec)
 
     def log_startup_summary(self) -> None:
-        ibm = self.providers["ibm_quantum"]
+        from .models import Mode
+        from .providers import provider_for_mode
+
+        hw = provider_for_mode(self.providers, Mode.HARDWARE)
         logger.info(
             "Quantum Randomness Lab backend ready — hardware provider %s (configured=%s), "
             "simulator available, data dir %s",
-            ibm.name, ibm.configured(), self.store._file.parent,
+            hw.name, hw.configured(), self.store._file.parent,
         )
 
 

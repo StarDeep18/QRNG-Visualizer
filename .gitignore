@@ -25,3 +25,7 @@ data/
 .DS_Store
 .idea/
 .vscode/
+
+# package manager caches (never commit)
+.cache/
+.npm/

@@ -22,6 +22,18 @@ def hermetic_env(monkeypatch):
         "IBM_QUANTUM_INSTANCE",
         "IBM_QUANTUM_CHANNEL",
         "IBM_QUANTUM_BACKEND",
+        "IQM_SERVER_URL",
+        "IQM_ACCESS_TOKEN",
+        "IQM_REFRESH_TOKEN",
+        "IQM_QUANTUM_COMPUTER",
+        "IQM_QUBIT",
+        "IQM_AUTH_SERVER_URL",
+        "IQM_AUTH_TOKEN_URL",
+        "IQM_AUTH_REALM",
+        "IQM_AUTH_CLIENT_ID",
+        "IQM_AUTH_CLIENT_SECRET",
+        "IQM_TOKEN",
+        "IQM_TOKENS_FILE",
     ):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr("qlab.config._file_env", lambda: {})

@@ -26,6 +26,18 @@ export const TERMINAL_STATES: JobState[] = [
 export type QrngMode = 'hardware' | 'simulator'
 export type ExperimentSource = 'classical' | 'quantum_hardware' | 'quantum_simulator'
 
+/** Display names for the hardware providers (values come from the backend's
+ * normalized `provider` field — the frontend stays provider-agnostic). */
+const PROVIDER_LABELS: Record<string, string> = {
+  iqm: 'IQM Quantum',
+  ibm_quantum: 'IBM Quantum',
+}
+
+export function providerLabel(provider?: string | null): string {
+  if (!provider) return 'quantum provider'
+  return PROVIDER_LABELS[provider] ?? provider.replace(/_/g, ' ')
+}
+
 export interface ApiErrorBody {
   error: {
     code: string
@@ -68,6 +80,7 @@ export interface QrngConfig {
     simulator: boolean
     reason: string | null
     setup_hint: string
+    setup_steps?: string[]
   }
   simulator: {
     available: boolean

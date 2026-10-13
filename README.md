@@ -6,17 +6,19 @@ An interactive web laboratory that puts two generation pipelines side by side:
 
 | | PRNG | QRNG (hardware) |
 |---|---|---|
-| source | SplitMix64 — a documented deterministic algorithm | a real quantum processor at IBM Quantum |
+| source | SplitMix64 — a documented deterministic algorithm | a real quantum processor (IQM preferred, IBM Quantum alternative) |
 | process | `seed → algorithm → identical stream` | `|0⟩ → H → superposition → measurement → physical bits` |
 | reproducible | **yes** — same seed ⇒ same sequence, forever | **no** — every run is a new physical experiment |
 | circuit | — | `q[0]: |0⟩ ──H──M── c[0]` (fixed, auditable) |
 
 The QRNG hardware path is **real**: the app submits the fixed circuit
-`|0⟩ → H → measure` through `QiskitRuntimeService` + `SamplerV2` to an
-operational, non-simulator IBM Quantum backend, and every displayed bit is
-extracted from the **returned shot-ordered measurement array**. Hardware mode
-never falls back to `Math.random()`, a classical PRNG, or a hidden simulator;
-the simulator exists only as an explicitly-labelled development mode.
+`|0⟩ → H → measure` to a real QPU — via IQM's native `prx(π/2, π/2)` +
+`measure` (iqm-client) when IQM is configured, otherwise through
+`QiskitRuntimeService` + `SamplerV2` to an operational, non-simulator IBM
+Quantum backend — and every displayed bit is extracted from the **returned
+shot-ordered per-shot measurement data**. Hardware mode never falls back to
+`Math.random()`, a classical PRNG, or a hidden simulator; the simulator
+exists only as an explicitly-labelled development mode.
 
 ---
 
@@ -174,13 +176,63 @@ tests/security/            secret-leak scan
 
 ## Security model
 
-- IBM credentials live **only** in server-side env/`.env` files; never in
-  responses, logs (a redaction filter guards the logger), or the frontend.
+- Quantum provider credentials (IQM and IBM) live **only** in server-side
+  env/`.env` files; never in responses, logs (a redaction filter guards the
+  logger), or the frontend.
 - `.env` is git-ignored; `.env.example` documents every variable.
 - No arbitrary circuits: the QRNG circuit is fixed and validated server-side.
 - Inputs are strictly validated (shots/bits bounds, backend name pattern,
   seed length); public endpoints are rate-limited; hardware submissions have
-  a local cooldown under IBM's 5 jobs/minute limit.
+  a local cooldown under provider rate limits.
+
+## Hardware providers (IQM preferred, IBM alternative)
+
+Hardware QRNG mode runs the fixed circuit (|0⟩ → H → measure) on a real QPU
+through the `QuantumProvider` abstraction:
+
+```
+QuantumProvider
+├── IQMProvider        — IQM Quantum (iqm-client, native circuits). ACTIVE when configured.
+├── IBMQuantumProvider — IBM Quantum (qiskit-ibm-runtime). Fallback when IQM is not configured.
+└── SimulatorProvider  — local ideal statevector, always labelled as simulation.
+```
+
+Selection is automatic: `provider_for_mode` picks IQM when
+`IQM_SERVER_URL` + `IQM_ACCESS_TOKEN` are set, otherwise IBM Quantum when
+`IBM_QUANTUM_API_KEY` is set. Switching providers is a pure config change.
+
+### IQM integration notes
+
+- **SDK**: plain `iqm-client` (v36). The `qiskit-iqm` adapter is deprecated,
+  and the `iqm-client[qiskit]` extra pins qiskit<2.2, which conflicts with
+  this project's qiskit 2.5 — so the backend constructs the IQM **native**
+  circuit directly: `prx(π/2, π/2)` (= R_y(π/2), which prepares |+⟩ = H|0⟩
+  exactly) followed by a Z-basis `measure`. The circuit is validated
+  client-side against the live `get_dynamic_quantum_architecture()` — qubit
+  names always come from the QPU, never invented.
+- **Per-shot results**: bits are read from `get_job_measurements()` (per-shot
+  `CircuitMeasurementResults`), never from aggregate counts. Bit order is
+  shot order: first measurement = first bit (MSB of the displayed number).
+- **Token handling (server-side only)**: `IQM_ACCESS_TOKEN` is used as the
+  bearer token. If `IQM_REFRESH_TOKEN` is set, the backend refreshes the
+  access token automatically when it is about to expire (JWT `exp` checked
+  proactively) — via the Cortex CLI Keycloak flow
+  (`IQM_AUTH_SERVER_URL`, realm `cortex`, client `iqm_client`) or an explicit
+  OAuth token endpoint (`IQM_AUTH_TOKEN_URL`, optional
+  `IQM_AUTH_CLIENT_ID`/`IQM_AUTH_CLIENT_SECRET`). Refresh failures block
+  submission *before* any quantum job is created; a 401-class rejection is
+  retried exactly once after refresh (a rejected request creates no job, so
+  no duplicates are possible); ambiguous timeouts are never auto-retried.
+  Tokens are never logged, never returned to the client, and all provider
+  error messages pass through the redaction filter (including in-memory
+  refreshed tokens).
+- **Environment variables**: `IQM_SERVER_URL`, `IQM_ACCESS_TOKEN` (both
+  required), `IQM_REFRESH_TOKEN`, `IQM_QUANTUM_COMPUTER`, `IQM_QUBIT`,
+  `IQM_AUTH_SERVER_URL` / `IQM_AUTH_TOKEN_URL` + `IQM_AUTH_REALM` /
+  `IQM_AUTH_CLIENT_ID` / `IQM_AUTH_CLIENT_SECRET` (refresh, optional).
+- **Hardware smoke test**: `python scripts/hardware_smoke.py` (from
+  `app/backend`) runs a real end-to-end QPU job through the same provider
+  adapter the app uses — works for whichever provider is configured.
 
 ## Honest-by-design guarantees
 

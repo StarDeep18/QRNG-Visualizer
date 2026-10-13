@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
-import { ApiError, type CompareResponse } from '../api/types'
+import { ApiError, providerLabel, type CompareResponse } from '../api/types'
 import { useStore } from '../state/store'
 import { DistributionChart } from '../viz/Charts'
 import { ErrorPanel } from '../components/ErrorPanels'
@@ -294,7 +294,7 @@ export function CompareView() {
                       value: data.qrng.source === 'quantum_hardware' ? 'quantum hardware' : 'simulator',
                       tone: data.qrng.source === 'quantum_hardware' ? 'cyan' : 'blue',
                     },
-                    { label: 'backend', value: `IBM Quantum — ${data.qrng.backend ?? '—'}` },
+                    { label: 'backend', value: `${providerLabel(data.qrng.provider)} — ${data.qrng.backend ?? '—'}` },
                     { label: 'measurements', value: `${data.qrng.shots} shots` },
                     { label: 'job', value: data.qrng.provider_job_id ?? data.qrng.experiment_id },
                   ]}

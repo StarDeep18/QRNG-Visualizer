@@ -113,6 +113,58 @@ def load_ibm_config() -> IBMConfig:
 
 
 # ---------------------------------------------------------------------------
+# IQM Quantum (real hardware provider when configured)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class IQMConfig:
+    """IQM Resonance / on-prem server configuration (all server-side only).
+
+    The access token may be either a long-lived Resonance dashboard token
+    (no refresh) or a short-lived access token paired with a refresh token
+    (Cortex CLI / IQM user-management OAuth world).
+    """
+
+    server_url: Optional[str]           # e.g. https://cocos.resonance.meetiqm.com (QPU appended per docs)
+    access_token: Optional[str]
+    refresh_token: Optional[str]        # optional — enables automatic refresh
+    quantum_computer: Optional[str]     # optional QC id/alias when the server controls several
+    qubit: Optional[str]                # optional explicit qubit name (must exist in the live architecture)
+    auth_token_url: Optional[str]       # explicit OAuth token endpoint (api.iqm.com style)
+    auth_server_url: Optional[str]      # Keycloak base URL (Cortex CLI style)
+    auth_realm: str = "cortex"
+    auth_client_id: str = "iqm_client"
+    auth_client_secret: Optional[str] = None
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.server_url and self.access_token)
+
+    @property
+    def refresh_configured(self) -> bool:
+        """True when we have a refresh token AND an endpoint to use it against."""
+        return bool(self.refresh_token and (self.auth_token_url or self.auth_server_url))
+
+
+def load_iqm_config() -> IQMConfig:
+    """Fresh read on every call (mtime-cached file env) so tokens added to
+    .env while the server runs are detected at the next submission."""
+    return IQMConfig(
+        server_url=(get_setting("IQM_SERVER_URL") or "").strip() or None,
+        access_token=(get_setting("IQM_ACCESS_TOKEN") or "").strip() or None,
+        refresh_token=(get_setting("IQM_REFRESH_TOKEN") or "").strip() or None,
+        quantum_computer=(get_setting("IQM_QUANTUM_COMPUTER") or "").strip() or None,
+        qubit=(get_setting("IQM_QUBIT") or "").strip() or None,
+        auth_token_url=(get_setting("IQM_AUTH_TOKEN_URL") or "").strip() or None,
+        auth_server_url=(get_setting("IQM_AUTH_SERVER_URL") or "").strip() or None,
+        auth_realm=(get_setting("IQM_AUTH_REALM") or "cortex").strip() or "cortex",
+        auth_client_id=(get_setting("IQM_AUTH_CLIENT_ID") or "iqm_client").strip() or "iqm_client",
+        auth_client_secret=(get_setting("IQM_AUTH_CLIENT_SECRET") or "").strip() or None,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Lab limits
 # ---------------------------------------------------------------------------
 
@@ -154,7 +206,12 @@ def data_dir() -> Path:
 # Secret hygiene
 # ---------------------------------------------------------------------------
 
-SECRET_ENV_KEYS = ("IBM_QUANTUM_API_KEY",)
+SECRET_ENV_KEYS = (
+    "IBM_QUANTUM_API_KEY",
+    "IQM_ACCESS_TOKEN",
+    "IQM_REFRESH_TOKEN",
+    "IQM_AUTH_CLIENT_SECRET",
+)
 
 
 def active_secrets() -> list[str]:

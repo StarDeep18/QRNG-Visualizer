@@ -7,13 +7,19 @@ from typing import Optional
 from fastapi import APIRouter, Request
 
 from ..models import JobState, Mode, TERMINAL_STATES
-from ..providers import CREDENTIALS_HINT
+from ..providers import provider_for_mode
 from ..providers.base import ProviderError
 from ..config import redact
 from .errors import ApiError
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/api/qrng", tags=["qrng"])
+
+
+def _hardware_provider(request: Request):
+    """The active hardware provider (IQM when configured, else IBM)."""
+    runtime = request.app.state.runtime
+    return provider_for_mode(runtime.providers, Mode.HARDWARE)
 
 
 class QrngJobRequest(BaseModel):
@@ -29,18 +35,19 @@ class QrngJobRequest(BaseModel):
 def qrng_config(request: Request) -> dict:
     """Provider/mode availability + limits. Fast (no provider network calls)."""
     runtime = request.app.state.runtime
-    ibm = runtime.providers["ibm_quantum"]
+    hw = _hardware_provider(request)
     limits = runtime.limits
-    configured = ibm.configured()
+    configured = hw.configured()
     cooldown = runtime.qrng.cooldown_remaining()
     return {
         "hardware": {
             "available": configured,
-            "provider": ibm.name,
-            "label": ibm.label,
+            "provider": hw.name,
+            "label": hw.label,
             "simulator": False,
-            "reason": None if configured else "IBM_QUANTUM_API_KEY is not set on the server",
-            "setup_hint": CREDENTIALS_HINT,
+            "reason": None if configured else getattr(hw, "NOT_CONFIGURED_REASON", "credentials are not set on the server"),
+            "setup_hint": getattr(hw, "SETUP_HINT", ""),
+            "setup_steps": list(getattr(hw, "SETUP_STEPS", [])),
         },
         "simulator": {
             "available": True,
@@ -64,14 +71,14 @@ def qrng_config(request: Request) -> dict:
 
 @router.get("/backends")
 def qrng_backends(request: Request) -> dict:
-    """REAL hardware backend list (live from IBM Quantum when configured)."""
-    runtime = request.app.state.runtime
-    ibm = runtime.providers["ibm_quantum"]
-    if not ibm.configured():
-        return {"available": False, "reason": "IBM_QUANTUM_API_KEY is not set on the server",
+    """REAL hardware backend list (live from the active provider when configured)."""
+    hw = _hardware_provider(request)
+    if not hw.configured():
+        return {"available": False,
+                "reason": getattr(hw, "NOT_CONFIGURED_REASON", "credentials are not set on the server"),
                 "backends": []}
     try:
-        infos = ibm.get_backend_metadata()
+        infos = hw.get_backend_metadata()
     except ProviderError as exc:
         return {"available": False, "reason": redact(exc.message), "backends": []}
     return {

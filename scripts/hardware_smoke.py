@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""REAL HARDWARE SMOKE TEST — Milestone 2 verification (TRD §19).
+"""REAL HARDWARE SMOKE TEST — provider-agnostic verification (TRD §19).
 
-Submits ONE small QRNG job to a real IBM Quantum QPU through the same
-provider adapter the app uses, polls until completion, and verifies:
+Submits ONE small QRNG job to a real quantum processor through the same
+provider adapter the app uses (IQM when configured, IBM Quantum otherwise),
+polls until completion, and verifies:
 
   1. the job ran on a real (non-simulator) backend
   2. the provider returned exactly `shots` measurement outcomes
   3. bits are only 0/1, in shot order
   4. provenance (provider, backend, job id) is captured
 
-Usage (from app/backend, with IBM_QUANTUM_API_KEY set in .env):
+Usage (from app/backend, with IQM_* or IBM_QUANTUM_* set in .env):
     python ../../scripts/hardware_smoke.py [--shots 64] [--backend auto]
 
 Exit code 0 = a real QPU experiment completed end-to-end successfully.
@@ -25,9 +26,8 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1] / "app" / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from qlab.config import load_limits  # noqa: E402
-from qlab.models import JobState  # noqa: E402
-from qlab.providers import build_default_providers  # noqa: E402
+from qlab.models import JobState, Mode  # noqa: E402
+from qlab.providers import build_default_providers, provider_for_mode  # noqa: E402
 from qlab.providers.base import ProviderError  # noqa: E402
 
 
@@ -39,17 +39,26 @@ def main() -> int:
     args = parser.parse_args()
 
     providers = build_default_providers()
-    provider = providers["ibm_quantum"]
+    provider = provider_for_mode(providers, Mode.HARDWARE)
 
     print("─" * 64)
     print("QUANTUM RANDOMNESS LAB — REAL HARDWARE SMOKE TEST")
     print("─" * 64)
 
     if not provider.configured():
-        print("✗ FAIL: IBM_QUANTUM_API_KEY is not configured on this server.")
-        print("  Set it in app/backend/.env (see .env.example) and retry.")
+        print(f"✗ FAIL: {provider.label} is not configured on this server.")
+        print("  Set IQM_SERVER_URL + IQM_ACCESS_TOKEN (or IBM_QUANTUM_API_KEY)")
+        print("  in app/backend/.env (see .env.example) and retry.")
         return 2
-    print("✓ provider configured: ibm_quantum (channel: see .env)")
+    print(f"✓ provider configured: {provider.name} ({provider.label})")
+
+    try:
+        metadata = provider.get_backend_metadata()
+        for info in metadata:
+            print(f"  backend: {info.name} — qubits={info.qubits} "
+                  f"operational={info.operational} simulator={info.simulator}")
+    except ProviderError as exc:
+        print(f"! backend discovery failed (continuing): {exc.code}: {exc.message}")
 
     circuit = provider.create_qrng_circuit()
     provider.validate_circuit(circuit)
@@ -70,6 +79,7 @@ def main() -> int:
     deadline = time.monotonic() + args.timeout
     interval = 3.0
     last = None
+    info = None
     while time.monotonic() < deadline:
         info = provider.get_job_status(submission.provider_job_id)
         if info.status is not last:
@@ -82,11 +92,11 @@ def main() -> int:
         interval = min(interval * 1.3, 15.0)
     else:
         print(f"✗ FAIL: timed out after {args.timeout}s (job {submission.provider_job_id} "
-              "may still complete on IBM's side)")
+              f"may still complete on {provider.name}'s side)")
         return 1
 
-    if info.status is not JobState.COMPLETED:
-        print(f"✗ FAIL: job ended in {info.status.value}")
+    if info is None or info.status is not JobState.COMPLETED:
+        print(f"✗ FAIL: job ended in {info.status.value if info else 'UNKNOWN'}")
         return 1
 
     try:
@@ -108,6 +118,10 @@ def main() -> int:
     print(f"  bits     : {result.bits[:64]}{'…' if args.shots > 64 else ''}")
     print(f"  zeros    : {zeros}   ones: {ones}   (σ for n={args.shots}: "
           f"{(0.25/args.shots)**0.5*100:.2f}%)")
+    if result.metadata:
+        for key in ("measurement_retrieval", "calibration_set_id"):
+            if key in result.metadata:
+                print(f"  {key}: {result.metadata[key]}")
     print("─" * 64)
 
     if problems:
@@ -118,7 +132,7 @@ def main() -> int:
     print("✓ PASS: REAL QPU EXPERIMENT COMPLETED END-TO-END")
     print(f"  provider={provider.name}  backend={submission.backend}  "
           f"job={submission.provider_job_id}  shots={args.shots}")
-    print("  Milestone 2 verified: measurement data returned by IBM Quantum,")
+    print(f"  Verified: per-shot measurement data returned by {provider.label},")
     print("  parsed shot-ordered, provenance retained.")
     return 0
 

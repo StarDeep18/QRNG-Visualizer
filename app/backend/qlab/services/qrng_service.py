@@ -4,7 +4,7 @@ Enforces, in one place:
   * shot-count bounds (validation with actionable messages)
   * simulator-only seeding (hardware outcomes cannot be seeded)
   * hardware requires a configured provider — never a silent fallback
-  * a global hardware submission cooldown under IBM's 5 jobs/min limit
+  * a global hardware submission cooldown under provider rate limits
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ class SubmissionCooldownError(ProviderError):
         super().__init__(
             "SUBMIT_COOLDOWN",
             f"Hardware submission cooldown active — wait {retry_after:.0f}s between QPU submissions.",
-            "IBM Quantum allows about 5 job submissions per minute; the lab enforces a "
+            "Quantum providers limit job submissions per minute; the lab enforces a "
             "local cooldown so you never hit it accidentally.",
         )
         self.retry_after = retry_after
@@ -90,11 +90,12 @@ class QrngService:
         provider = provider_for_mode(self._providers, mode)
         if mode is Mode.HARDWARE:
             if not provider.configured():
+                hint = getattr(provider, "SETUP_HINT", None) or (
+                    "Add provider credentials to app/backend/.env — see the configuration panel."
+                )
                 raise ProviderNotConfigured(
-                    "IBM Quantum credentials are not configured on this server.",
-                    "Hardware mode stays unavailable until IBM_QUANTUM_API_KEY is set "
-                    "server-side (app/backend/.env). Simulator mode is available and "
-                    "always labelled as simulation.",
+                    f"{getattr(provider, 'label', 'The hardware provider')} is not configured on this server.",
+                    hint,
                 )
             remaining = self.cooldown_remaining()
             if remaining > 0:

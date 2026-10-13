@@ -49,8 +49,12 @@ def test_qrng_config_reports_hardware_unavailable_without_credentials(client):
     assert r.status_code == 200
     body = r.json()
     assert body["hardware"]["available"] is False
-    assert "IBM_QUANTUM_API_KEY" in body["hardware"]["reason"]
+    # IQM is the primary hardware provider; its env vars are what's missing
+    assert body["hardware"]["provider"] == "iqm"
+    assert "IQM_SERVER_URL" in body["hardware"]["reason"]
+    assert "IQM_ACCESS_TOKEN" in body["hardware"]["reason"]
     assert body["hardware"]["setup_hint"]
+    assert body["hardware"]["setup_steps"]          # provider-driven setup steps for the UI
     assert body["simulator"]["available"] is True
     assert body["simulator"]["simulator"] is True
     assert body["limits"]["min_shots"] == 8

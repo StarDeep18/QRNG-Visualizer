@@ -13,7 +13,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
-import { TERMINAL_STATES, type QrngMode, type QrngResult } from '../api/types'
+import { TERMINAL_STATES, providerLabel, type QrngMode, type QrngResult } from '../api/types'
 import { BitstreamOutput } from '../components/BitstreamOutput'
 import { DistributionChart, RunningFrequencyChart } from '../viz/Charts'
 import { ErrorPanel, HardwareConfigPanel } from '../components/ErrorPanels'
@@ -188,6 +188,8 @@ export function QrngPanel() {
               {mode === 'hardware' && !hardwareReady ? (
                 <HardwareConfigPanel
                   hint={config?.hardware.setup_hint ?? ''}
+                  providerName={config ? providerLabel(config.hardware.provider) : undefined}
+                  steps={config?.hardware.setup_steps}
                   onSimulator={() => setMode('simulator')}
                 />
               ) : (
@@ -308,7 +310,7 @@ export function QrngPanel() {
                 value: result.source === 'quantum_hardware' ? 'quantum hardware' : 'simulator',
                 tone: result.source === 'quantum_hardware' ? 'cyan' : 'blue',
               },
-              { label: 'backend', value: `IBM Quantum — ${result.backend ?? '—'}` },
+              { label: 'backend', value: `${providerLabel(result.provider)} — ${result.backend ?? '—'}` },
               { label: 'measurements', value: `${result.shots} shots` },
               { label: 'job', value: result.provider_job_id ?? result.experiment_id },
               { label: 'status', value: 'completed', tone: 'green' },

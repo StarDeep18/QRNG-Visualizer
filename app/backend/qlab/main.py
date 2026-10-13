@@ -37,9 +37,10 @@ def create_app(runtime: Runtime | None = None) -> FastAPI:
         title="Quantum Randomness Lab API",
         version=__version__,
         description=(
-            "PRNG (deterministic SplitMix64) vs QRNG (real quantum hardware via IBM "
-            "Quantum, fixed circuit |0⟩ → H → measure). Every hardware bit originates "
-            "from returned provider measurement data."
+            "PRNG (deterministic SplitMix64) vs QRNG (real quantum hardware via IQM "
+            "when configured, IBM Quantum as alternative, fixed circuit |0⟩ → H → "
+            "measure). Every hardware bit originates from returned provider "
+            "measurement data."
         ),
     )
     app.state.runtime = runtime or build_runtime()
