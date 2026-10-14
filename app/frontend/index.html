@@ -3,12 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a0d11" />
-    <title>Quantum Randomness Lab — see where randomness comes from</title>
-    <meta
-      name="description"
-      content="Don't just see the random number — see where the randomness comes from. PRNG vs real-hardware quantum QRNG, visualized: |0⟩ → H → measure → bits."
-    />
+    <meta name="theme-color" content="#F7F4EC" />
+    <title>Quantum Randomness Lab</title>
+    <meta name="description" content="Generate and watch random numbers — deterministic PRNG vs real quantum hardware." />
+    <script>
+      /* no-flash theme bootstrap (mirrors src/theme.ts) */
+      (function () {
+        try {
+          var t = localStorage.getItem('qrl-theme')
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          }
+          document.documentElement.dataset.theme = t
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light'
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

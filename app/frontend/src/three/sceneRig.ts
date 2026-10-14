@@ -4,20 +4,12 @@ import { useMemo } from 'react'
  * Kept in a tiny standalone module so panels can create rigs without
  * statically importing the heavy lazy-loaded scene chunks. */
 
-/** Bloch-sphere educational view stages. */
-export type SceneStage = 'initial' | 'hGate' | 'superposition' | 'measuring' | 'collapsed'
-
-/** Quantum Measurement Lab stages (A–F). */
-export type LabStage =
-  | 'idle' // A — |0⟩ initialized
-  | 'hGate' // B — applying Hadamard
-  | 'superposition' // C — |+⟩
-  | 'measuring' // D — real job in flight, outcome unknown
-  | 'replay' // E — replaying returned bits into the register
-  | 'done' // F — register complete, number revealed
-
-/** Deterministic Engine stages. */
-export type EngineStage = 'idle' | 'running' | 'replay' | 'done'
+/** Unified generation stage used by both 3D scenes.
+ *  idle   — calm, nothing generated yet
+ *  active — work in flight (QRNG: circuit executing on the QPU / PRNG: computing)
+ *  replay — replaying the returned bits into the register
+ *  done   — register complete, number formed */
+export type GenStage = 'idle' | 'active' | 'replay' | 'done'
 
 export interface CameraRig {
   theta: number
@@ -32,10 +24,10 @@ export interface CameraRig {
 
 export function createRig(): CameraRig {
   return {
-    theta: 0.42,
-    phi: 1.18,
-    targetTheta: 0.42,
-    targetPhi: 1.18,
+    theta: 0.35,
+    phi: 1.22,
+    targetTheta: 0.35,
+    targetPhi: 1.22,
     dragging: false,
     lastInteraction: 0,
     lx: 0,
@@ -83,8 +75,8 @@ export function useDragHandlers(rig: import('react').MutableRefObject<CameraRig>
       rig.current.lastInteraction = performance.now()
     }
     const dbl = () => {
-      rig.current.targetTheta = 0.42
-      rig.current.targetPhi = 1.18
+      rig.current.targetTheta = 0.35
+      rig.current.targetPhi = 1.22
     }
     return {
       onPointerDown: down,

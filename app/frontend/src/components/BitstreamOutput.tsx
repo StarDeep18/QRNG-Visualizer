@@ -1,9 +1,11 @@
 /* BitstreamOutput — the first-class result display.
  *
  * Renders the EXACT sequence returned by the API (never regenerated):
- * large monospace binary grouped into bytes with offset gutters, a hex view
- * (arbitrary-precision, padding documented), or the dot-grid as a secondary
- * view. Copy / TXT / JSON / expand controls. Empty and error states.
+ * monospace binary grouped into bytes with offset gutters, a hex view
+ * (arbitrary-precision, padding documented), or the dot-grid as a
+ * secondary view. Copy / TXT / JSON / expand controls. Empty and error
+ * states. Restyled for the milky-white design system — same guarantees,
+ * quieter chrome.
  */
 
 import { useMemo, useState } from 'react'
@@ -86,17 +88,17 @@ export function BitstreamOutput({
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
 
   return (
-    <section className="panel bitstream-panel" aria-label={title}>
-      <header className="panel-head">
-        <h2 className="panel-title">{title}</h2>
+    <section className="bitstream-panel" aria-label={title}>
+      <header className="bitstream-head">
+        <span className="eyebrow">{title}</span>
         {bits && (
-          <div className="view-toggle" role="tablist" aria-label="bitstream display format">
+          <div className="stage-tools" role="tablist" aria-label="bitstream display format">
             {(['binary', 'hex', 'grid'] as const).map((v) => (
               <button
                 key={v}
                 role="tab"
                 aria-selected={view === v}
-                className={`view-toggle-btn ${view === v ? 'active' : ''}`}
+                className={`tool-btn ${view === v ? 'active' : ''}`}
                 onClick={() => setView(v)}
               >
                 {v}
@@ -106,172 +108,153 @@ export function BitstreamOutput({
         )}
       </header>
 
-      <div className="panel-body">
-        {/* provenance header lines */}
-        {bits && meta.length > 0 && (
-          <dl className="bitstream-meta">
-            {meta.map((m) => (
-              <div className="meta-item" key={m.label}>
-                <dt>{m.label}</dt>
-                <dd className={`tone-${m.tone ?? 'plain'}`}>{m.value}</dd>
-              </div>
+      {bits && meta.length > 0 && (
+        <dl className="meta-list">
+          {meta.map((m) => (
+            <div className="meta-item" key={m.label}>
+              <dt>{m.label}</dt>
+              <dd className={`tone-${m.tone ?? 'plain'}`}>{m.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+
+      {error && (
+        <div className="errbox" role="alert">
+          <span className="err-code">{error.code.replace(/_/g, ' ')}</span>
+          <span className="err-msg">{error.message}</span>
+        </div>
+      )}
+
+      {!bits && !error && (
+        <div className="bitstream-empty">
+          <svg width="120" height="28" viewBox="0 0 120 28" aria-hidden>
+            {Array.from({ length: 16 }).map((_, i) => (
+              <rect
+                key={i}
+                x={i * 7.5}
+                y={i % 2 === 0 ? 4 : 14}
+                width="5"
+                height="5"
+                fill={i % 3 === 0 ? 'none' : 'currentColor'}
+                stroke="currentColor"
+                strokeWidth="1"
+                opacity={i % 3 === 0 ? 0.4 : 0.7}
+              />
             ))}
-          </dl>
-        )}
+          </svg>
+          <p className="micro">{emptyHint}</p>
+        </div>
+      )}
 
-        {/* error state */}
-        {error && (
-          <div className="bitstream-error" role="alert">
-            <span className="err-code">{error.code.replace(/_/g, ' ')}</span>
-            <span>{error.message}</span>
+      {bits && view === 'binary' && (
+        <div
+          className={`bitstream ${expanded ? '' : 'clipped'}`}
+          role="region"
+          aria-label={`binary bitstream, ${total} bits`}
+        >
+          {visibleBinary.map((line) => (
+            <div className="stream-line" key={line.offset}>
+              <span className="stream-offset">{String(line.offset).padStart(4, '0')}</span>
+              <span className="stream-bits">
+                {line.bytes.map((byte, i) => (
+                  <span className="stream-byte" key={i}>
+                    {byte.split('').map((c, j) => (
+                      <span className={c === '1' ? 'b1' : 'b0'} key={j}>
+                        {c}
+                      </span>
+                    ))}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {bits && view === 'hex' && (
+        <div
+          className={`bitstream ${expanded ? '' : 'clipped'}`}
+          role="region"
+          aria-label={`bitstream in hexadecimal, ${total} bits`}
+        >
+          {visibleHex.map((line) => (
+            <div className="stream-line" key={line.offset}>
+              <span className="stream-offset">{String(line.offset).padStart(4, '0')}</span>
+              <span className="stream-bits mono">
+                {line.groups.map((g, i) => (
+                  <span className="stream-byte" key={i}>
+                    {g}
+                  </span>
+                ))}
+              </span>
+            </div>
+          ))}
+          <div className="micro" style={{ marginTop: 8 }}>
+            arbitrary-precision · {total} bits → {hexInfo.hex.length} hex digits
+            {hexInfo.paddedBits > 0 &&
+              ` · final nibble zero-padded with ${hexInfo.paddedBits} bit${
+                hexInfo.paddedBits === 1 ? '' : 's'
+              }`}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* empty state */}
-        {!bits && !error && (
-          <div className="bitstream-empty">
-            <svg width="120" height="28" viewBox="0 0 120 28" aria-hidden>
-              {Array.from({ length: 16 }).map((_, i) => (
-                <rect
-                  key={i}
-                  x={i * 7.5}
-                  y={i % 2 === 0 ? 4 : 14}
-                  width="5"
-                  height="5"
-                  fill={i % 3 === 0 ? 'none' : 'currentColor'}
-                  stroke="currentColor"
-                  strokeWidth="1"
-                  opacity={i % 3 === 0 ? 0.4 : 0.7}
-                />
-              ))}
-            </svg>
-            <p>{emptyHint}</p>
-          </div>
-        )}
+      {bits && view === 'grid' && (
+        <div className="bitstream-grid-wrap">
+          <BitGridView bits={bits} reveal={reveal} source={undefined} label={title} />
+        </div>
+      )}
 
-        {/* readout */}
-        {bits && view === 'binary' && (
-          <div
-            className={`bitstream-readout ${expanded ? '' : 'clipped'}`}
-            role="region"
-            aria-label={`binary bitstream, ${total} bits`}
+      {bits && (
+        <div className="btn-row" style={{ marginTop: 12 }}>
+          <span className="micro">
+            <b>{total.toLocaleString()}</b> bits · <b>{zeros.toLocaleString()}</b> zeros ·{' '}
+            <b>{ones.toLocaleString()}</b> ones
+          </span>
+          <span style={{ flex: 1 }} />
+          <button className="btn small" onClick={() => void copyBits()}>
+            {copied ? '✓ copied' : 'copy bits'}
+          </button>
+          <button
+            className="btn small"
+            onClick={() => download(`bitstream-${stamp}.txt`, bits, 'text/plain')}
           >
-            {visibleBinary.map((line) => (
-              <div className="bit-line" key={line.offset}>
-                <span className="bit-offset">{String(line.offset).padStart(4, '0')}</span>
-                <span className="bit-bytes">
-                  {line.bytes.map((byte, i) => (
-                    <span className="bit-byte" key={i}>
-                      {byte.split('').map((c, j) => (
-                        <span className={c === '1' ? 'bit-1' : 'bit-0'} key={j}>
-                          {c}
-                        </span>
-                      ))}
-                    </span>
-                  ))}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {bits && view === 'hex' && (
-          <div
-            className={`bitstream-readout hex ${expanded ? '' : 'clipped'}`}
-            role="region"
-            aria-label={`bitstream in hexadecimal, ${total} bits`}
+            txt
+          </button>
+          <button
+            className="btn small"
+            onClick={() =>
+              download(
+                `bitstream-${stamp}.json`,
+                JSON.stringify(
+                  {
+                    title,
+                    exported_at: new Date().toISOString(),
+                    bits,
+                    hex: hexInfo.hex,
+                    hex_padding_bits: hexInfo.paddedBits,
+                    bit_count: total,
+                    zero_count: zeros,
+                    one_count: ones,
+                    ...jsonExtra,
+                  },
+                  null,
+                  2,
+                ),
+                'application/json',
+              )
+            }
           >
-            {visibleHex.map((line) => (
-              <div className="bit-line" key={line.offset}>
-                <span className="bit-offset">{String(line.offset).padStart(4, '0')}</span>
-                <span className="bit-bytes">
-                  {line.groups.map((g, i) => (
-                    <span className="bit-byte" key={i}>
-                      {g}
-                    </span>
-                  ))}
-                </span>
-              </div>
-            ))}
-            <div className="hex-pad-note">
-              arbitrary-precision conversion · {total} bits → {hexInfo.hex.length} hex digits
-              {hexInfo.paddedBits > 0 &&
-                ` · final nibble zero-padded with ${hexInfo.paddedBits} bit${
-                  hexInfo.paddedBits === 1 ? '' : 's'
-                }`}
-            </div>
-          </div>
-        )}
-
-        {bits && view === 'grid' && (
-          <div className="bitstream-grid-wrap">
-            <BitGridView bits={bits} reveal={reveal} source={undefined} label={title} />
-          </div>
-        )}
-
-        {/* counts + actions */}
-        {bits && (
-          <div className="bitstream-foot">
-            <div className="bitstream-counts" aria-label="bit counts">
-              <span className="count-chip">
-                <b>{total.toLocaleString()}</b> bits
-              </span>
-              <span className="count-chip z">
-                <b>{zeros.toLocaleString()}</b> zeros ·{' '}
-                {total ? ((100 * zeros) / total).toFixed(1) : '0.0'}%
-              </span>
-              <span className="count-chip o">
-                <b>{ones.toLocaleString()}</b> ones ·{' '}
-                {total ? ((100 * ones) / total).toFixed(1) : '0.0'}%
-              </span>
-            </div>
-            <div className="bitstream-actions">
-              <button className="btn small" onClick={() => void copyBits()}>
-                {copied ? '✓ copied' : 'copy bits'}
-              </button>
-              <button
-                className="btn small"
-                onClick={() => download(`bitstream-${stamp}.txt`, bits, 'text/plain')}
-              >
-                download txt
-              </button>
-              <button
-                className="btn small"
-                onClick={() =>
-                  download(
-                    `bitstream-${stamp}.json`,
-                    JSON.stringify(
-                      {
-                        title,
-                        exported_at: new Date().toISOString(),
-                        bits,
-                        hex: hexInfo.hex,
-                        hex_padding_bits: hexInfo.paddedBits,
-                        bit_count: total,
-                        zero_count: zeros,
-                        one_count: ones,
-                        ...jsonExtra,
-                      },
-                      null,
-                      2,
-                    ),
-                    'application/json',
-                  )
-                }
-              >
-                download json
-              </button>
-              {hasMore && (
-                <button className="btn small ghost" onClick={() => setExpanded((v) => !v)}>
-                  {expanded
-                    ? 'collapse'
-                    : `expand full output · ${binaryLines.length} lines`}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+            json
+          </button>
+          {hasMore && (
+            <button className="collapse-toggle" onClick={() => setExpanded((v) => !v)}>
+              {expanded ? 'collapse' : `expand · ${binaryLines.length} lines`}
+            </button>
+          )}
+        </div>
+      )}
     </section>
   )
 }
