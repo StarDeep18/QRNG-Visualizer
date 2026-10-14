@@ -1,9 +1,10 @@
 /* sceneShared — infrastructure shared by the 3D scenes:
- *   SceneEnv      — themed background/fog + PMREM room environment
+ *   SceneEnv      — PMREM room environment for quality materials
  *   RigControl    — damped orbit camera driven by the shared rig ref
+ *   useDragHandlers — pointer handlers for the viewport wrapper (pan-y safe)
  *   projectLabel  — projects a world anchor onto a DOM label chip
  *   registerLayout — slot positions for the shared binary-register design
- *   digitTexture  — canvas texture for floating 3D bit glyphs
+ *   detectWebGL   — capability check for the panels' fallbacks
  */
 
 import { useEffect, useMemo, useRef } from 'react'
@@ -11,67 +12,12 @@ import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
 import type { CameraRig } from './sceneRig'
-import type { Theme } from '../theme'
-
-export interface ScenePalette {
-  bg: string
-  ground: string
-  ceramic: string
-  ceramicEdge: string
-  accent: string // teal
-  accentDeep: string
-  coral: string
-  lav: string
-  ink: string
-  envIntensity: number
-  lightIntensity: number
-  hemiSky: string
-  hemiGround: string
-}
-
-export const LIGHT_PALETTE: ScenePalette = {
-  bg: '#f3efe4',
-  ground: '#ece7d9',
-  ceramic: '#f6f2e8',
-  ceramicEdge: '#d8d2c5',
-  accent: '#0fae9f',
-  accentDeep: '#0b8a7e',
-  coral: '#f4704a',
-  lav: '#7580e0',
-  ink: '#2a2723',
-  envIntensity: 0.55,
-  lightIntensity: 1.35,
-  hemiSky: '#fffdf6',
-  hemiGround: '#d9d2c0',
-}
-
-export const DARK_PALETTE: ScenePalette = {
-  bg: '#1b1b1b',
-  ground: '#161616',
-  ceramic: '#33322f',
-  ceramicEdge: '#464440',
-  accent: '#2cc7b5',
-  accentDeep: '#3fdccd',
-  coral: '#ff8a66',
-  lav: '#8e97f0',
-  ink: '#c9c4b8',
-  envIntensity: 0.35,
-  lightIntensity: 1.1,
-  hemiSky: '#3c3c3c',
-  hemiGround: '#141414',
-}
-
-export function paletteFor(theme: Theme): ScenePalette {
-  return theme === 'dark' ? DARK_PALETTE : LIGHT_PALETTE
-}
 
 /* ── environment ────────────────────────────────────────────────────── */
 
-export function SceneEnv({ palette, intensity = 0.5 }: { palette: ScenePalette; intensity?: number }) {
+export function SceneEnv({ intensity = 0.5 }: { intensity?: number }) {
   const { gl, scene } = useThree()
   useEffect(() => {
-    scene.background = new THREE.Color(palette.bg)
-    scene.fog = new THREE.Fog(palette.bg, 14, 30)
     const pmrem = new THREE.PMREMGenerator(gl)
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04)
     scene.environment = env.texture
@@ -81,7 +27,7 @@ export function SceneEnv({ palette, intensity = 0.5 }: { palette: ScenePalette; 
       env.texture.dispose()
       pmrem.dispose()
     }
-  }, [gl, scene, intensity, palette])
+  }, [gl, scene, intensity])
   return null
 }
 
@@ -91,7 +37,7 @@ export function RigControl({
   rig,
   reducedMotion,
   radius = 9.6,
-  target = [0, 1.5, 0],
+  target = [0, 1.15, 0],
   autoSpeed = 0.04,
 }: {
   rig: import('react').MutableRefObject<CameraRig>
@@ -139,7 +85,7 @@ export function projectLabel(
   const y = (-scratch.y * 0.5 + 0.5) * h
   el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -130%)`
   const near = world.dot(camera.position) >= 0
-  el.style.opacity = near ? '1' : '0.25'
+  el.style.opacity = near ? '1' : '0.3'
 }
 
 /* ── shared binary-register layout ──────────────────────────────────── */
@@ -154,15 +100,15 @@ export interface SlotLayout {
 export function registerLayout(width: number): SlotLayout {
   const rows = width > 16 ? 2 : 1
   const perRow = Math.ceil(width / rows)
-  const size = width <= 8 ? 0.62 : width <= 16 ? 0.5 : 0.44
-  const gap = size * 1.26
+  const size = width <= 8 ? 0.6 : width <= 16 ? 0.48 : 0.42
+  const gap = size * 1.24
   const positions: THREE.Vector3[] = []
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < perRow; c++) {
       positions.push(
         new THREE.Vector3(
           (c - (perRow - 1) / 2) * gap,
-          rows === 1 ? 0 : (r === 0 ? 1 : -1) * size * 0.7,
+          rows === 1 ? 0 : (r === 0 ? 1 : -1) * size * 0.68,
           0,
         ),
       )
@@ -171,40 +117,33 @@ export function registerLayout(width: number): SlotLayout {
   return { positions, size }
 }
 
-/* ── digit glyph texture (floating 0/1 sprites — no font loading) ───── */
-
-export function digitTexture(digit: '0' | '1', color: string): THREE.CanvasTexture {
-  const size = 128
-  const canvas = document.createElement('canvas')
-  canvas.width = size
-  canvas.height = size
-  const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, size, size)
-  ctx.font = '700 86px "Inter Variable", Inter, Helvetica, Arial, sans-serif'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = color
-  ctx.fillText(digit, size / 2, size / 2 + 6)
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.anisotropy = 4
-  return tex
-}
-
 /* ── misc helpers ───────────────────────────────────────────────────── */
+
+/** Dispose GPU resources created outside R3F's JSX ownership. */
+export function useDispose(...objs: Array<THREE.BufferGeometry | THREE.Material | undefined>) {
+  useEffect(
+    () => () => {
+      for (const o of objs) o?.dispose()
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  )
+}
 
 /** Scratch-vector quad bezier (no allocations). */
 export function quadBezier(
   out: THREE.Vector3,
   a: THREE.Vector3,
+  mid: THREE.Vector3,
   b: THREE.Vector3,
-  c: THREE.Vector3,
   t: number,
 ): THREE.Vector3 {
   const u = 1 - t
   return out.set(
-    u * u * a.x + 2 * u * t * b.x + t * t * c.x,
-    u * u * a.y + 2 * u * t * b.y + t * t * c.y,
-    u * u * a.z + 2 * u * t * b.z + t * t * c.z,
+    u * u * a.x + 2 * u * t * mid.x + t * t * b.x,
+    u * u * a.y + 2 * u * t * mid.y + t * t * b.y,
+    u * u * a.z + 2 * u * t * mid.z + t * t * b.z,
   )
 }
 

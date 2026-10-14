@@ -1,9 +1,15 @@
 /* Charts — hand-rolled SVG/CSS, no chart library. Scientific honesty is
  * built in: theoretical 50/50 with the finite-shot 1σ band, observed bars,
- * and a running-frequency trace that visibly converges toward 50%.
- * Colors come from the theme's CSS variables (light/dark aware). */
+ * and a running-frequency trace that visibly converges toward 50%. */
 
 import { runningOneFrequency, sigmaPct } from '../lib/bits'
+
+/* colors come from the theme's CSS variables — light and dark aware */
+const BLUE = 'var(--blue)'
+const CYAN = 'var(--cyan-deep)'
+const AMBER = 'var(--amber)'
+const DIM = 'var(--text-2)'
+const MONO = 'var(--mono)'
 
 export function DistributionChart({
   zeroCount,
@@ -28,7 +34,7 @@ export function DistributionChart({
   return (
     <div>
       <div className="dist-row">
-        <span className="dist-label">zeros</span>
+        <span className="dist-label">observed — 0</span>
         <div className="dist-track">
           <div className="dist-fill obs0" style={{ width: `${zeroPct}%` }} />
           {sigma > 0 && sigma < 25 && (
@@ -41,7 +47,7 @@ export function DistributionChart({
         <span className="dist-value">{zeroPct.toFixed(1)}%</span>
       </div>
       <div className="dist-row">
-        <span className="dist-label">ones</span>
+        <span className="dist-label">observed — 1</span>
         <div className="dist-track">
           <div className="dist-fill obs1" style={{ width: `${onePct}%` }} />
           {sigma > 0 && sigma < 25 && (
@@ -53,13 +59,49 @@ export function DistributionChart({
         </div>
         <span className="dist-value">{onePct.toFixed(1)}%</span>
       </div>
+      <div className="dist-row">
+        <span className="dist-label">theory — 0/1</span>
+        <div className="dist-track" title={`expected 1σ range: ±${sigma.toFixed(2)}%`}>
+          <div className="dist-fill theory" style={{ width: '50%' }} />
+          {sigma > 0 && sigma < 25 && (
+            <div
+              className="sigma-band"
+              style={{ left: `${bandLeft}%`, width: `${bandWidth}%` }}
+            />
+          )}
+        </div>
+        <span className="dist-value">50.0%</span>
+      </div>
       {!compact && (
         <>
-          <p className="micro" style={{ marginTop: 10, marginBottom: 0 }}>
-            theory 50/50 · 1σ for n={total} = ±{sigma.toFixed(2)} pts
+          <div className="dist-legend">
+            <span>
+              <span className="swatch" style={{ background: BLUE, borderColor: BLUE }} />
+              observed 0
+            </span>
+            <span>
+              <span className="swatch" style={{ background: CYAN, borderColor: CYAN }} />
+              observed 1
+            </span>
+            <span>
+              <span className="swatch" />
+              50% theory
+            </span>
+            <span>
+              <span
+                className="swatch"
+                style={{ borderStyle: 'dashed', borderColor: AMBER, background: 'transparent' }}
+              />
+              ±1σ for n={total} = ±{sigma.toFixed(2)}%
+            </span>
+          </div>
+          <p className="kv-note" style={{ marginTop: 12, marginBottom: 0 }}>
+            Finite shots fluctuate: the expected 1σ spread for n={total} is ±
+            {sigma.toFixed(2)} percentage points
             {typeof zScore === 'number' && Number.isFinite(zScore)
-              ? ` · this run ${zScore >= 0 ? '+' : ''}${zScore.toFixed(2)}σ`
+              ? ` — this run sits at ${zScore >= 0 ? '+' : ''}${zScore.toFixed(2)}σ from theory`
               : ''}
+            .
           </p>
         </>
       )}
@@ -103,7 +145,7 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
         y={y(50 + sigma)}
         width={plotW}
         height={Math.max(1, y(50 - sigma) - y(50 + sigma))}
-        style={{ fill: 'var(--accent-soft)' }}
+        style={{ fill: 'var(--blue-dim)' }}
       />
       {/* 50% reference */}
       <line
@@ -111,12 +153,12 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
         y1={y(50)}
         x2={width - padR}
         y2={y(50)}
-        style={{ stroke: 'var(--border-strong)' }}
+        style={{ stroke: 'var(--edge-bright)' }}
         strokeDasharray="5 4"
         strokeWidth="1.2"
       />
       {/* trace */}
-      <path d={path} fill="none" style={{ stroke: 'var(--accent)' }} strokeWidth="1.8" />
+      <path d={path} fill="none" style={{ stroke: CYAN }} strokeWidth="1.8" />
       {/* axis labels */}
       {[70, 60, 50, 40, 30].map((pct) => (
         <text
@@ -124,14 +166,17 @@ export function RunningFrequencyChart({ bits, height = 150 }: { bits: string; he
           x={padL - 6}
           y={y(pct) + 3.5}
           textAnchor="end"
+          style={{ fontFamily: MONO, fill: DIM }}
           fontSize="9.5"
-          style={{ fill: 'var(--text-3)' }}
         >
           {pct}%
         </text>
       ))}
-      <text x={padL} y={height - 6} fontSize="9.5" style={{ fill: 'var(--text-3)' }}>
-        running frequency of 1s — first {n.toLocaleString()} bits
+      <text x={padL} y={height - 6} style={{ fontFamily: MONO, fill: DIM }} fontSize="9.5">
+        shot 1
+      </text>
+      <text x={width - padR} y={height - 6} textAnchor="end" style={{ fontFamily: MONO, fill: DIM }} fontSize="9.5">
+        shot {n}
       </text>
     </svg>
   )

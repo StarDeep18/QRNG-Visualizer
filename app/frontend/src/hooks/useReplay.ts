@@ -8,9 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-
-/** Circuit sub-phases within one replayed shot. */
-export type CircuitPhase = 0 | 1 | 2 | 3 | 4
+import type { CircuitPhase } from '../viz/CircuitDiagram'
 
 export const REPLAY_SPEEDS = [0.5, 1, 2, 4, 8] as const
 
